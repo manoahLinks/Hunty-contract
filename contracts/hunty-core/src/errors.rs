@@ -21,6 +21,7 @@ pub enum HuntErrorCode {
     TooManyClues = 14,
     InvalidQuestion = 15,
     RefundFailed = 16,
+    NoCluesAdded = 17,
 }
 
 #[derive(Debug)]

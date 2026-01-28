@@ -1041,4 +1041,30 @@ mod test {
             assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
         });
     }
+
+    #[test]
+    fn test_get_hunt_info() {
+        let env = Env::default();
+        let creator = Address::generate(&env);
+
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Query Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+
+            let info = HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap();
+
+            assert_eq!(info.hunt_id, hunt_id);
+            assert_eq!(info.creator, creator);
+            assert_eq!(info.title, "Query Hunt");
+            assert_eq!(info.status, HuntStatus::Draft);
+            assert_eq!(info.reward_pool, 0);
+        });
+    }
 }

@@ -56,9 +56,23 @@ pub struct ClueInfo {
     pub is_required: bool,
 }
 
+#[contracttype]
 #[derive(Clone)]
 pub struct HuntCancelledEvent {
     pub hunt_id: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct HuntDeactivatedEvent {
+    pub hunt_id: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct HuntActivatedEvent {
+    pub hunt_id: u64,
+    pub activated_at: u64,
 }
 
 #[contracttype]

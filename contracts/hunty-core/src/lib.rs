@@ -2,7 +2,8 @@
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
-    Clue, ClueAddedEvent, ClueInfo, Hunt, HuntCreatedEvent, HuntStatus, RewardConfig,
+    Clue, ClueAddedEvent, ClueInfo, Hunt, HuntCreatedEvent, HuntStatus, RewardConfig, HuntActivatedEvent,
+    HuntDeactivatedEvent, HuntCancelledEvent
 };
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
 
@@ -241,11 +242,11 @@ impl HuntyCore {
         b == 0x20 || b == 0x09 || b == 0x0a || b == 0x0d
     }
 
-    pub fn activate_hunt(env: Env, hunt_id: u64) -> Result<(), HuntErrorCode> {
+    pub fn activate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
         // Verify caller is the creator
-        let caller = env.invoker();
+       
         if caller != hunt.creator {
             return Err(HuntErrorCode::Unauthorized);
         }
@@ -275,12 +276,11 @@ impl HuntyCore {
         Ok(())
     }
 
-    pub fn deactivate_hunt(env: Env, hunt_id: u64) -> Result<(), HuntErrorCode> {
+    pub fn deactivate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         // Load hunt
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
         // Verify caller is creator
-        let caller = env.invoker();
         if caller != hunt.creator {
             return Err(HuntErrorCode::Unauthorized);
         }
@@ -302,12 +302,11 @@ impl HuntyCore {
         Ok(())
     }
 
-    pub fn cancel_hunt(env: Env, hunt_id: u64) -> Result<(), HuntErrorCode> {
+    pub fn cancel_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         // Load hunt
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
         // Verify caller is creator
-        let caller = env.invoker();
         if caller != hunt.creator {
             return Err(HuntErrorCode::Unauthorized);
         }
@@ -338,6 +337,21 @@ impl HuntyCore {
             .publish((Symbol::new(&env, "HuntCancelled"), hunt_id), event);
 
         Ok(())
+    }
+
+    pub fn get_hunt_info(env: Env, hunt_id: u64) -> Result<Hunt, HuntErrorCode> {
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+        match hunt.status {
+            HuntStatus::Draft
+            | HuntStatus::Active
+            | HuntStatus::Completed
+            | HuntStatus::Cancelled => {}
+            _ => return Err(HuntErrorCode::InvalidHuntStatus),
+        }
+
+        // Return the full Hunt struct
+        Ok(hunt)
     }
 }
 
