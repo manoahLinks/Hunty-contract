@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN, String, Vec, Env};
+use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +54,25 @@ pub struct ClueInfo {
     pub question: String,
     pub points: u32,
     pub is_required: bool,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct HuntCancelledEvent {
+    pub hunt_id: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct HuntDeactivatedEvent {
+    pub hunt_id: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct HuntActivatedEvent {
+    pub hunt_id: u64,
+    pub activated_at: u64,
 }
 
 #[contracttype]
@@ -120,8 +139,7 @@ impl PlayerProgress {
 
 impl Hunt {
     pub fn is_active(&self, current_time: u64) -> bool {
-        self.status == HuntStatus::Active 
-            && (self.end_time == 0 || current_time < self.end_time)
+        self.status == HuntStatus::Active && (self.end_time == 0 || current_time < self.end_time)
     }
 
     pub fn has_rewards_available(&self) -> bool {
