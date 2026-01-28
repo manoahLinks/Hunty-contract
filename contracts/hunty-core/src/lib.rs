@@ -2,8 +2,8 @@
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
-    Clue, ClueAddedEvent, ClueInfo, Hunt, HuntCreatedEvent, HuntStatus, RewardConfig, HuntActivatedEvent,
-    HuntDeactivatedEvent, HuntCancelledEvent
+    Clue, ClueAddedEvent, ClueInfo, Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCreatedEvent,
+    HuntDeactivatedEvent, HuntStatus, RewardConfig,
 };
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
 
@@ -246,7 +246,7 @@ impl HuntyCore {
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
         // Verify caller is the creator
-       
+
         if caller != hunt.creator {
             return Err(HuntErrorCode::Unauthorized);
         }
