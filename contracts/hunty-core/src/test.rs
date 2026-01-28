@@ -8,10 +8,20 @@ use std::string::ToString;
 mod test {
     use super::*;
     use soroban_sdk::{Env, String, Address};
+    // Bring Soroban testutils traits into scope (generate addresses, set ledger info, register contracts).
+    use soroban_sdk::testutils::{Address as _, Ledger as _, Register as _};
     use crate::errors::{HuntErrorCode, HuntError};
     use crate::types::{HuntStatus, RewardConfig};
     use crate::storage::Storage;
     use crate::HuntyCore;
+
+    /// Runs a closure inside a registered HuntyCore contract context so storage is accessible.
+    fn with_core_contract<T>(env: &Env, f: impl FnOnce(&Env, &Address) -> T) -> T {
+        let contract_id = env.register_contract(None, HuntyCore);
+        env.as_contract(&contract_id, || {
+            f(env, &contract_id)
+        })
+    }
 
      #[test]
     fn test_error_with_context_display() {
@@ -66,25 +76,27 @@ mod test {
     #[test]
     fn test_create_hunt_success() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "Test Hunt");
         let description = String::from_str(&env, "This is a test hunt description");
 
-        let contract = HuntyCore;
-        let hunt_id = contract.create_hunt(
-            env.clone(),
-            creator.clone(),
-            title.clone(),
-            description.clone(),
-            None,
-            None,
-        ).unwrap();
+        let (hunt_id, hunt) = with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title.clone(),
+                description.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            (hunt_id, hunt)
+        });
 
         // Verify hunt ID is 1 (first hunt)
         assert_eq!(hunt_id, 1);
-
-        // Verify hunt was stored correctly
-        let hunt = Storage::get_hunt(&env, hunt_id).unwrap();
         assert_eq!(hunt.hunt_id, hunt_id);
         assert_eq!(hunt.creator, creator);
         assert_eq!(hunt.title, title);
@@ -104,41 +116,38 @@ mod test {
     #[test]
     fn test_create_hunt_with_end_time() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "Timed Hunt");
         let description = String::from_str(&env, "A hunt with an end time");
         let end_time = 1000000u64;
 
-        let contract = HuntyCore;
-        let hunt_id = contract.create_hunt(
-            env.clone(),
-            creator.clone(),
-            title.clone(),
-            description.clone(),
-            None,
-            Some(end_time),
-        ).unwrap();
-
-        let hunt = Storage::get_hunt(&env, hunt_id).unwrap();
+        let hunt = with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title.clone(),
+                description.clone(),
+                None,
+                Some(end_time),
+            )
+            .unwrap();
+            Storage::get_hunt(env, hunt_id).unwrap()
+        });
         assert_eq!(hunt.end_time, end_time);
     }
 
     #[test]
     fn test_create_hunt_empty_title() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "");
         let description = String::from_str(&env, "Valid description");
 
-        let contract = HuntyCore;
-        let result = contract.create_hunt(
-            env.clone(),
-            creator,
-            title,
-            description,
-            None,
-            None,
-        );
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+        });
 
         assert_eq!(result, Err(HuntErrorCode::InvalidTitle));
     }
@@ -146,20 +155,15 @@ mod test {
     #[test]
     fn test_create_hunt_title_too_long() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         // Create a title longer than 200 characters
         let long_title = String::from_str(&env, &"a".repeat(201));
         let description = String::from_str(&env, "Valid description");
 
-        let contract = HuntyCore;
-        let result = contract.create_hunt(
-            env.clone(),
-            creator,
-            long_title,
-            description,
-            None,
-            None,
-        );
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, long_title, description, None, None)
+        });
 
         assert_eq!(result, Err(HuntErrorCode::InvalidTitle));
     }
@@ -167,20 +171,15 @@ mod test {
     #[test]
     fn test_create_hunt_title_exactly_max_length() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         // Create a title exactly 200 characters (should be valid)
         let title = String::from_str(&env, &"a".repeat(200));
         let description = String::from_str(&env, "Valid description");
 
-        let contract = HuntyCore;
-        let result = contract.create_hunt(
-            env.clone(),
-            creator,
-            title,
-            description,
-            None,
-            None,
-        );
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+        });
 
         assert!(result.is_ok());
     }
@@ -188,20 +187,15 @@ mod test {
     #[test]
     fn test_create_hunt_description_too_long() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "Valid Title");
         // Create a description longer than 2000 characters
         let long_description = String::from_str(&env, &"a".repeat(2001));
 
-        let contract = HuntyCore;
-        let result = contract.create_hunt(
-            env.clone(),
-            creator,
-            title,
-            long_description,
-            None,
-            None,
-        );
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, long_description, None, None)
+        });
 
         assert_eq!(result, Err(HuntErrorCode::InvalidDescription));
     }
@@ -209,20 +203,15 @@ mod test {
     #[test]
     fn test_create_hunt_description_exactly_max_length() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "Valid Title");
         // Create a description exactly 2000 characters (should be valid)
         let description = String::from_str(&env, &"a".repeat(2000));
 
-        let contract = HuntyCore;
-        let result = contract.create_hunt(
-            env.clone(),
-            creator,
-            title,
-            description,
-            None,
-            None,
-        );
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+        });
 
         assert!(result.is_ok());
     }
@@ -230,40 +219,43 @@ mod test {
     #[test]
     fn test_create_hunt_unique_ids() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title1 = String::from_str(&env, "Hunt 1");
         let title2 = String::from_str(&env, "Hunt 2");
         let title3 = String::from_str(&env, "Hunt 3");
         let description = String::from_str(&env, "Description");
 
-        let contract = HuntyCore;
-        
-        let hunt_id1 = contract.create_hunt(
-            env.clone(),
-            creator.clone(),
-            title1,
-            description.clone(),
-            None,
-            None,
-        ).unwrap();
-
-        let hunt_id2 = contract.create_hunt(
-            env.clone(),
-            creator.clone(),
-            title2,
-            description.clone(),
-            None,
-            None,
-        ).unwrap();
-
-        let hunt_id3 = contract.create_hunt(
-            env.clone(),
-            creator.clone(),
-            title3,
-            description,
-            None,
-            None,
-        ).unwrap();
+        let (hunt_id1, hunt_id2, hunt_id3) = with_core_contract(&env, |env, _cid| {
+            let hunt_id1 = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title1,
+                description.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+            let hunt_id2 = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title2,
+                description.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+            let hunt_id3 = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title3,
+                description,
+                None,
+                None,
+            )
+            .unwrap();
+            (hunt_id1, hunt_id2, hunt_id3)
+        });
 
         // Verify IDs are unique and sequential
         assert_eq!(hunt_id1, 1);
@@ -276,34 +268,35 @@ mod test {
     #[test]
     fn test_create_hunt_different_creators() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator1 = Address::generate(&env);
         let creator2 = Address::generate(&env);
         let title = String::from_str(&env, "Test Hunt");
         let description = String::from_str(&env, "Description");
 
-        let contract = HuntyCore;
-        
-        let hunt_id1 = contract.create_hunt(
-            env.clone(),
-            creator1.clone(),
-            title.clone(),
-            description.clone(),
-            None,
-            None,
-        ).unwrap();
-
-        let hunt_id2 = contract.create_hunt(
-            env.clone(),
-            creator2.clone(),
-            title,
-            description,
-            None,
-            None,
-        ).unwrap();
-
-        // Verify each hunt stores its creator correctly
-        let hunt1 = Storage::get_hunt(&env, hunt_id1).unwrap();
-        let hunt2 = Storage::get_hunt(&env, hunt_id2).unwrap();
+        let (hunt_id1, hunt_id2, hunt1, hunt2) = with_core_contract(&env, |env, _cid| {
+            let hunt_id1 = HuntyCore::create_hunt(
+                env.clone(),
+                creator1.clone(),
+                title.clone(),
+                description.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+            let hunt_id2 = HuntyCore::create_hunt(
+                env.clone(),
+                creator2.clone(),
+                title,
+                description,
+                None,
+                None,
+            )
+            .unwrap();
+            let hunt1 = Storage::get_hunt(env, hunt_id1).unwrap();
+            let hunt2 = Storage::get_hunt(env, hunt_id2).unwrap();
+            (hunt_id1, hunt_id2, hunt1, hunt2)
+        });
         
         assert_eq!(hunt1.creator, creator1);
         assert_eq!(hunt2.creator, creator2);
@@ -313,62 +306,58 @@ mod test {
     #[test]
     fn test_create_hunt_counter_increments() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "Test Hunt");
         let description = String::from_str(&env, "Description");
 
-        // Verify counter starts at 0
-        assert_eq!(Storage::get_hunt_counter(&env), 0);
-
-        let contract = HuntyCore;
+        let (start_counter, hunt_id1, counter_after_1, hunt_id2, counter_after_2) = with_core_contract(&env, |env, _cid| {
+            // Verify counter starts at 0
+            let start_counter = Storage::get_hunt_counter(env);
+            
+            // Create first hunt
+            let hunt_id1 = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title.clone(),
+                description.clone(),
+                None,
+                None,
+            )
+            .unwrap();
+            
+            // Counter should be 1 after first hunt
+            let counter_after_1 = Storage::get_hunt_counter(env);
+            
+            // Create second hunt
+            let hunt_id2 = HuntyCore::create_hunt(env.clone(), creator.clone(), title, description, None, None).unwrap();
+            
+            // Counter should be 2 after second hunt
+            let counter_after_2 = Storage::get_hunt_counter(env);
+            
+            (start_counter, hunt_id1, counter_after_1, hunt_id2, counter_after_2)
+        });
         
-        // Create first hunt
-        let hunt_id1 = contract.create_hunt(
-            env.clone(),
-            creator.clone(),
-            title.clone(),
-            description.clone(),
-            None,
-            None,
-        ).unwrap();
-
-        // Counter should be 1 after first hunt
-        assert_eq!(Storage::get_hunt_counter(&env), 1);
+        assert_eq!(start_counter, 0);
+        assert_eq!(counter_after_1, 1);
         assert_eq!(hunt_id1, 1);
-
-        // Create second hunt
-        let hunt_id2 = contract.create_hunt(
-            env.clone(),
-            creator.clone(),
-            title,
-            description,
-            None,
-            None,
-        ).unwrap();
-
-        // Counter should be 2 after second hunt
-        assert_eq!(Storage::get_hunt_counter(&env), 2);
+        assert_eq!(counter_after_2, 2);
         assert_eq!(hunt_id2, 2);
     }
 
     #[test]
     fn test_create_hunt_default_reward_config() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "Test Hunt");
         let description = String::from_str(&env, "Description");
 
-        let contract = HuntyCore;
-        let hunt_id = contract.create_hunt(
-            env.clone(),
-            creator,
-            title,
-            description,
-            None,
-            None,
-        ).unwrap();
-
-        let hunt = Storage::get_hunt(&env, hunt_id).unwrap();
+        let hunt = with_core_contract(&env, |env, _cid| {
+            let hunt_id =
+                HuntyCore::create_hunt(env.clone(), creator, title, description, None, None).unwrap();
+            Storage::get_hunt(env, hunt_id).unwrap()
+        });
         let reward_config = hunt.reward_config;
 
         // Verify default reward config values
@@ -382,22 +371,16 @@ mod test {
     #[test]
     fn test_create_hunt_created_at_timestamp() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let creator = Address::generate(&env);
         let title = String::from_str(&env, "Test Hunt");
         let description = String::from_str(&env, "Description");
 
-        let contract = HuntyCore;
-        let hunt_id = contract.create_hunt(
-            env.clone(),
-            creator,
-            title,
-            description,
-            None,
-            None,
-        ).unwrap();
-
-        let hunt = Storage::get_hunt(&env, hunt_id).unwrap();
-        let current_time = env.ledger().timestamp();
+        let (hunt, current_time) = with_core_contract(&env, |env, _cid| {
+            let hunt_id =
+                HuntyCore::create_hunt(env.clone(), creator, title, description, None, None).unwrap();
+            (Storage::get_hunt(env, hunt_id).unwrap(), env.ledger().timestamp())
+        });
 
         // Created timestamp should be set and reasonable (within a few seconds)
         assert!(hunt.created_at > 0);

@@ -31,7 +31,7 @@ impl HuntyCore {
         creator: Address,
         title: String,
         description: String,
-        start_time: Option<u64>,
+        _start_time: Option<u64>,
         end_time: Option<u64>,
     ) -> Result<u64, HuntErrorCode> {
         // Validate creator address - in Soroban, Address is always valid if constructed,
