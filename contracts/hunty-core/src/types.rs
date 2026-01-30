@@ -235,3 +235,12 @@ pub struct PlayerRegisteredEvent {
     pub hunt_id: u64,
     pub player: Address,
 }
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AnswerIncorrectEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub clue_id: u32,
+    pub timestamp: u64,
+}
