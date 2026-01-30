@@ -9,9 +9,8 @@ impl RewardManager {
     // TODO: Implement reward distribution logic
 }
 
-mod xlm_handler;
 mod nft_handler;
+mod xlm_handler;
 
 #[cfg(test)]
 mod test;
-

@@ -2,7 +2,8 @@
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
-    Clue, ClueAddedEvent, ClueInfo, Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCreatedEvent,
+    AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, Hunt,
+    HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
     HuntDeactivatedEvent, HuntStatus, PlayerProgress, PlayerRegisteredEvent, RewardConfig,
 };
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
@@ -400,6 +401,151 @@ impl HuntyCore {
             .publish((Symbol::new(&env, "PlayerRegistered"), hunt_id), event);
 
         Ok(())
+    }
+
+    /// This function verifies the submitted answer by hashing it and comparing
+    /// with the stored answer hash. If correct, updates player progress and emits
+    /// success events. If incorrect, emits an analytics event and returns an error.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt ID
+    /// * `clue_id` - The clue ID to answer
+    /// * `player` - The address of the player submitting the answer
+    /// * `answer` - The plain-text answer submission
+    ///
+    /// # Returns
+    /// `Ok(())` on successful answer verification and progress update
+    ///
+    /// # Errors
+    /// * `HuntNotFound` - Hunt does not exist
+    /// * `HuntNotActive` - Hunt is not currently active or has ended
+    /// * `PlayerNotRegistered` - Player has not registered for this hunt
+    /// * `ClueNotFound` - Clue does not exist in this hunt
+    /// * `ClueAlreadyCompleted` - Player has already completed this clue
+    /// * `InvalidAnswer` - Submitted answer does not match the stored hash
+    ///
+    /// # Events
+    /// * `ClueCompleted` - Emitted when answer is correct
+    /// * `HuntCompleted` - Emitted when all required clues are completed
+    /// * `AnswerIncorrect` - Emitted when answer is wrong (for analytics)
+    pub fn submit_answer(
+        env: Env,
+        hunt_id: u64,
+        clue_id: u32,
+        player: Address,
+        answer: String,
+    ) -> Result<(), HuntErrorCode> {
+        // Require player authorization
+        player.require_auth();
+
+        // 1. Verify hunt exists and is active
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+        let current_time = env.ledger().timestamp();
+        if !hunt.is_active(current_time) {
+            return Err(HuntErrorCode::HuntNotActive);
+        }
+
+        let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
+            .ok_or(HuntErrorCode::PlayerNotRegistered)?;
+
+        let clue = Storage::get_clue(&env, hunt_id, clue_id).ok_or(HuntErrorCode::ClueNotFound)?;
+
+        if progress.has_completed_clue(clue_id) {
+            return Err(HuntErrorCode::ClueAlreadyCompleted);
+        }
+
+        let submitted_hash =
+            Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
+
+        if submitted_hash != clue.answer_hash {
+            // Answer is incorrect - emit analytics event and return error
+            let incorrect_event = AnswerIncorrectEvent {
+                hunt_id,
+                player: player.clone(),
+                clue_id,
+                timestamp: current_time,
+            };
+            env.events().publish(
+                (Symbol::new(&env, "AnswerIncorrect"), hunt_id, clue_id),
+                incorrect_event,
+            );
+            return Err(HuntErrorCode::InvalidAnswer);
+        }
+
+        progress.complete_clue(&env, clue_id, clue.points);
+
+        let all_required_completed =
+            Self::check_all_required_clues_completed(&env, hunt_id, &progress);
+
+        // If all required clues completed, mark hunt as completed for this player
+        if all_required_completed && !progress.is_completed {
+            progress.is_completed = true;
+            progress.completed_at = current_time;
+
+            // Emit HuntCompleted event
+            let hunt_completed_event = HuntCompletedEvent {
+                hunt_id,
+                player: player.clone(),
+                total_score: progress.total_score,
+                completion_time: current_time,
+            };
+            env.events().publish(
+                (Symbol::new(&env, "HuntCompleted"), hunt_id),
+                hunt_completed_event,
+            );
+        }
+
+        Storage::save_player_progress(&env, &progress);
+
+        let clue_completed_event = ClueCompletedEvent {
+            hunt_id,
+            player: player.clone(),
+            clue_id,
+            points_earned: clue.points,
+        };
+        env.events().publish(
+            (Symbol::new(&env, "ClueCompleted"), hunt_id, clue_id),
+            clue_completed_event,
+        );
+
+        Ok(())
+    }
+
+    /// Checks if a player has completed all required clues for a hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt ID
+    /// * `progress` - The player's progress data
+    ///
+    /// # Returns
+    /// `true` if all required clues are completed, `false` otherwise
+    fn check_all_required_clues_completed(
+        env: &Env,
+        hunt_id: u64,
+        progress: &PlayerProgress,
+    ) -> bool {
+        // Get all clues for the hunt
+        let all_clues = Storage::list_clues_for_hunt(env, hunt_id);
+
+        // Iterate through all clues and check if all required ones are completed
+        for i in 0..all_clues.len() {
+            let clue = all_clues.get(i).unwrap();
+
+            // If this is a required clue
+            if clue.is_required {
+                // Check if player has completed it
+                if !progress.has_completed_clue(clue.clue_id) {
+                    // Found a required clue that's not completed
+                    return false;
+                }
+            }
+        }
+
+        // All required clues are completed
+        true
     }
 
     /// Returns player progress for a hunt, or None if not registered.

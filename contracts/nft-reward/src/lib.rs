@@ -11,4 +11,3 @@ impl NftReward {
 
 #[cfg(test)]
 mod test;
-

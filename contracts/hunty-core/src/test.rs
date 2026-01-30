@@ -1135,7 +1135,8 @@ mod test {
 
             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
 
-            let progress = HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
+            let progress =
+                HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
             assert_eq!(progress.player, player);
             assert_eq!(progress.hunt_id, hunt_id);
             assert_eq!(progress.completed_clues.len(), 0);
