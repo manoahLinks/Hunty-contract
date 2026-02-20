@@ -1854,4 +1854,287 @@ mod test {
         assert_eq!(stats.total_score_sum, 20);
         assert_eq!(stats.average_score, 6);
     }
+
+    // ========== complete_hunt() Tests ==========
+
+    /// Helper: creates a hunt, adds a required clue, activates, registers a player,
+    /// submits the correct answer, and configures rewards. Returns (hunt_id, contract_id).
+    fn setup_completed_hunt_with_rewards(
+        env: &Env,
+        creator: &Address,
+        player: &Address,
+        max_winners: u32,
+        xlm_pool: i128,
+    ) -> (u64, Address) {
+        let contract_id = env.register_contract(None, HuntyCore);
+        let question = String::from_str(env, "What is 1+1?");
+        let answer = String::from_str(env, "2");
+
+        // Create hunt
+        let hunt_id = as_core_contract(env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Reward Hunt"),
+                String::from_str(env, "A hunt with rewards"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        // Add clue and activate
+        env.mock_all_auths();
+        as_core_contract(env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                question.clone(),
+                answer.clone(),
+                10,
+                true,
+            )
+            .unwrap();
+
+            // Update reward config on the hunt
+            let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            hunt.reward_config = crate::types::RewardConfig::new(
+                xlm_pool,
+                false,
+                None,
+                max_winners,
+            );
+            Storage::save_hunt(env, &hunt);
+
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // Register player
+        env.mock_all_auths();
+        as_core_contract(env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        // Submit correct answer (triggers is_completed = true)
+        env.mock_all_auths();
+        as_core_contract(env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                answer.clone(),
+            )
+            .unwrap();
+        });
+
+        (hunt_id, contract_id)
+    }
+
+    #[test]
+    fn test_complete_hunt_success_no_reward_manager() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        // Complete hunt (no RewardManager set — should still succeed)
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        // Verify progress updated
+        let progress = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap()
+        });
+        assert!(progress.reward_claimed);
+
+        // Verify hunt claimed_count incremented
+        let hunt = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.reward_config.claimed_count, 1);
+    }
+
+    #[test]
+    fn test_complete_hunt_not_completed() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        // Create hunt with 2 required clues
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Q1"),
+                String::from_str(env, "a1"),
+                10,
+                true,
+            )
+            .unwrap();
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Q2"),
+                String::from_str(env, "a2"),
+                10,
+                true,
+            )
+            .unwrap();
+
+            let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            hunt.reward_config =
+                crate::types::RewardConfig::new(1000, false, None, 5);
+            Storage::save_hunt(env, &hunt);
+
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // Register and answer only 1 of 2 required clues
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                String::from_str(env, "a1"),
+            )
+            .unwrap();
+        });
+
+        // Try to complete — should fail
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone())
+        });
+        assert_eq!(result, Err(HuntErrorCode::HuntNotCompleted));
+    }
+
+    #[test]
+    fn test_complete_hunt_double_claim() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        // First claim — success
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        // Second claim — should fail
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone())
+        });
+        assert_eq!(result, Err(HuntErrorCode::RewardAlreadyClaimed));
+    }
+
+    #[test]
+    fn test_complete_hunt_max_winners_reached() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+
+        // max_winners = 1
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player1, 1, 1000);
+
+        // Player1 claims successfully
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player1.clone()).unwrap();
+        });
+
+        // Register and complete for player2
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player2.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player2.clone(),
+                String::from_str(env, "2"),
+            )
+            .unwrap();
+        });
+
+        // Player2 tries to claim — no slots left
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player2.clone())
+        });
+        assert_eq!(result, Err(HuntErrorCode::InsufficientRewardPool));
+    }
+
+    #[test]
+    fn test_complete_hunt_no_rewards_configured() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        // max_winners = 0, xlm_pool = 0 (default from create_hunt)
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 0, 0);
+
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone())
+        });
+        assert_eq!(result, Err(HuntErrorCode::NoRewardsConfigured));
+    }
+
+    #[test]
+    fn test_complete_hunt_player_not_registered() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, stranger.clone())
+        });
+        assert_eq!(result, Err(HuntErrorCode::PlayerNotRegistered));
+    }
 }
