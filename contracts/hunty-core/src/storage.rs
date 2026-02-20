@@ -16,6 +16,7 @@ impl Storage {
     const CLUES_LIST_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
     const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
     const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CCNT");
+    const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
 
     // ========== Hunt Storage Functions ==========
 
@@ -375,5 +376,17 @@ impl Storage {
     pub fn get_clue_counter(env: &Env, hunt_id: u64) -> u32 {
         let key = Self::clue_counter_key(hunt_id);
         env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    // ========== Reward Manager Storage Functions ==========
+
+    pub fn set_reward_manager(env: &Env, address: &Address) {
+        env.storage()
+            .persistent()
+            .set(&Self::REWARD_MGR_KEY, address);
+    }
+
+    pub fn get_reward_manager(env: &Env) -> Option<Address> {
+        env.storage().persistent().get(&Self::REWARD_MGR_KEY)
     }
 }

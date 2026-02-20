@@ -5,9 +5,11 @@ use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, Hunt,
     HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
     HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
-    PlayerRegisteredEvent, RewardConfig,
+    PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig,
 };
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
+use soroban_sdk::{
+    contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
+};
 
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
@@ -355,6 +357,104 @@ impl HuntyCore {
 
         // Return the full Hunt struct
         Ok(hunt)
+    }
+
+    /// Sets the RewardManager contract address for cross-contract reward distribution.
+    pub fn set_reward_manager(env: Env, reward_manager: Address) {
+        Storage::set_reward_manager(&env, &reward_manager);
+    }
+
+    /// Completes a hunt for a player and distributes rewards.
+    ///
+    /// This function verifies that the player has completed all required clues,
+    /// then distributes rewards via the RewardManager contract (if configured)
+    /// and updates the player's reward status.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt ID
+    /// * `player` - The player claiming completion/rewards
+    ///
+    /// # Returns
+    /// `Ok(())` on successful reward claim
+    ///
+    /// # Errors
+    /// * `HuntNotFound` - Hunt does not exist
+    /// * `PlayerNotRegistered` - Player is not registered
+    /// * `HuntNotCompleted` - Player hasn't completed all required clues
+    /// * `RewardAlreadyClaimed` - Player already claimed their reward
+    /// * `NoRewardsConfigured` - No rewards set up for this hunt
+    /// * `InsufficientRewardPool` - All reward slots taken
+    /// * `RewardDistributionFailed` - Cross-contract call failed
+    pub fn complete_hunt(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
+        player.require_auth();
+
+        let mut hunt =
+            Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
+
+        let mut progress = Storage::get_player_progress_or_error(&env, hunt_id, &player)
+            .map_err(HuntErrorCode::from)?;
+
+        // Verify the player has completed all required clues
+        if !progress.is_completed {
+            return Err(HuntErrorCode::HuntNotCompleted);
+        }
+
+        // Prevent double-claiming
+        if progress.reward_claimed {
+            return Err(HuntErrorCode::RewardAlreadyClaimed);
+        }
+
+        // Check rewards are configured
+        if hunt.reward_config.max_winners == 0 {
+            return Err(HuntErrorCode::NoRewardsConfigured);
+        }
+
+        // Check reward slots are available
+        if !hunt.has_rewards_available() {
+            return Err(HuntErrorCode::InsufficientRewardPool);
+        }
+
+        let reward_amount = hunt.reward_config.reward_per_winner();
+        let nft_awarded = hunt.reward_config.nft_enabled;
+
+        // Call RewardManager if configured
+        if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
+            let mut args: Vec<Val> = Vec::new(&env);
+            args.push_back(player.clone().into_val(&env));
+            args.push_back(hunt_id.into_val(&env));
+            args.push_back(reward_amount.into_val(&env));
+            args.push_back(nft_awarded.into_val(&env));
+
+            let success: bool = env.invoke_contract(
+                &reward_manager_addr,
+                &Symbol::new(&env, "distribute_rewards"),
+                args,
+            );
+            if !success {
+                return Err(HuntErrorCode::RewardDistributionFailed);
+            }
+        }
+
+        // Update player progress
+        progress.reward_claimed = true;
+        Storage::save_player_progress(&env, &progress);
+
+        // Update hunt reward config
+        hunt.reward_config.claimed_count += 1;
+        Storage::save_hunt(&env, &hunt);
+
+        // Emit RewardClaimedEvent
+        let event = RewardClaimedEvent {
+            hunt_id,
+            player: player.clone(),
+            xlm_amount: reward_amount,
+            nft_awarded,
+        };
+        env.events()
+            .publish((Symbol::new(&env, "RewardClaimed"), hunt_id), event);
+
+        Ok(())
     }
 
     /// Registers a player for an active hunt. The caller must pass their address and authorize;

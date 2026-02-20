@@ -22,6 +22,10 @@ pub enum HuntErrorCode {
     InvalidQuestion = 15,
     RefundFailed = 16,
     NoCluesAdded = 17,
+    HuntNotCompleted = 18,
+    RewardAlreadyClaimed = 19,
+    RewardDistributionFailed = 20,
+    NoRewardsConfigured = 21,
 }
 
 #[derive(Debug)]
@@ -41,6 +45,10 @@ pub enum HuntError {
     InvalidAddress,
     TooManyClues { hunt_id: u64, limit: u32 },
     InvalidQuestion,
+    HuntNotCompleted { hunt_id: u64 },
+    RewardAlreadyClaimed { hunt_id: u64 },
+    RewardDistributionFailed { hunt_id: u64 },
+    NoRewardsConfigured { hunt_id: u64 },
 }
 
 impl fmt::Display for HuntError {
@@ -98,6 +106,18 @@ impl fmt::Display for HuntError {
             HuntError::InvalidQuestion => {
                 write!(f, "Invalid question (empty or exceeds max length)")
             }
+            HuntError::HuntNotCompleted { hunt_id } => {
+                write!(f, "Hunt {} not completed by player", hunt_id)
+            }
+            HuntError::RewardAlreadyClaimed { hunt_id } => {
+                write!(f, "Reward already claimed for hunt {}", hunt_id)
+            }
+            HuntError::RewardDistributionFailed { hunt_id } => {
+                write!(f, "Reward distribution failed for hunt {}", hunt_id)
+            }
+            HuntError::NoRewardsConfigured { hunt_id } => {
+                write!(f, "No rewards configured for hunt {}", hunt_id)
+            }
         }
     }
 }
@@ -120,6 +140,10 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::InvalidAddress => HuntErrorCode::InvalidAddress,
             HuntError::TooManyClues { .. } => HuntErrorCode::TooManyClues,
             HuntError::InvalidQuestion => HuntErrorCode::InvalidQuestion,
+            HuntError::HuntNotCompleted { .. } => HuntErrorCode::HuntNotCompleted,
+            HuntError::RewardAlreadyClaimed { .. } => HuntErrorCode::RewardAlreadyClaimed,
+            HuntError::RewardDistributionFailed { .. } => HuntErrorCode::RewardDistributionFailed,
+            HuntError::NoRewardsConfigured { .. } => HuntErrorCode::NoRewardsConfigured,
         }
     }
 }
