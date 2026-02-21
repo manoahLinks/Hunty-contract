@@ -1,18 +1,16 @@
 {
   "generators": {
-    "address": 3,
+    "address": 2,
     "nonce": 0
   },
   "auth": [
-    [],
-    [],
     [],
     []
   ],
   "ledger": {
     "protocol_version": 22,
     "sequence_number": 0,
-    "timestamp": 1000,
+    "timestamp": 1700000000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -22,7 +20,7 @@
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": {
               "symbol": "CNTR"
             },
@@ -35,13 +33,13 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
                 "key": {
                   "symbol": "CNTR"
                 },
                 "durability": "persistent",
                 "val": {
-                  "u64": 3
+                  "u64": 2
                 }
               }
             },
@@ -53,11 +51,11 @@
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": {
               "vec": [
                 {
-                  "symbol": "NFT"
+                  "symbol": "HUNT"
                 },
                 {
                   "u64": 1
@@ -73,11 +71,11 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
                 "key": {
                   "vec": [
                     {
-                      "symbol": "NFT"
+                      "symbol": "HUNT"
                     },
                     {
                       "u64": 1
@@ -89,6 +87,46 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "activated_at"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "created_at"
+                      },
+                      "val": {
+                        "u64": 1700000000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "creator"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "description"
+                      },
+                      "val": {
+                        "string": "Description"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "end_time"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "hunt_id"
                       },
                       "val": {
@@ -97,32 +135,57 @@
                     },
                     {
                       "key": {
-                        "symbol": "metadata"
+                        "symbol": "required_clues"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_config"
                       },
                       "val": {
                         "map": [
                           {
                             "key": {
-                              "symbol": "description"
+                              "symbol": "claimed_count"
                             },
                             "val": {
-                              "string": "Desc 1"
+                              "u32": 0
                             }
                           },
                           {
                             "key": {
-                              "symbol": "image_uri"
+                              "symbol": "max_winners"
                             },
                             "val": {
-                              "string": "ipfs://1"
+                              "u32": 0
                             }
                           },
                           {
                             "key": {
-                              "symbol": "title"
+                              "symbol": "nft_contract"
+                            },
+                            "val": "void"
+                          },
+                          {
+                            "key": {
+                              "symbol": "nft_enabled"
                             },
                             "val": {
-                              "string": "NFT 1"
+                              "bool": false
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "xlm_pool"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 0
+                              }
                             }
                           }
                         ]
@@ -130,26 +193,30 @@
                     },
                     {
                       "key": {
-                        "symbol": "minted_at"
+                        "symbol": "status"
                       },
                       "val": {
-                        "u64": 1000
+                        "vec": [
+                          {
+                            "symbol": "Draft"
+                          }
+                        ]
                       }
                     },
                     {
                       "key": {
-                        "symbol": "nft_id"
+                        "symbol": "title"
                       },
                       "val": {
-                        "u64": 1
+                        "string": "Test Hunt"
                       }
                     },
                     {
                       "key": {
-                        "symbol": "owner"
+                        "symbol": "total_clues"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        "u32": 0
                       }
                     }
                   ]
@@ -164,11 +231,11 @@
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": {
               "vec": [
                 {
-                  "symbol": "NFT"
+                  "symbol": "HUNT"
                 },
                 {
                   "u64": 2
@@ -184,11 +251,11 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
                 "key": {
                   "vec": [
                     {
-                      "symbol": "NFT"
+                      "symbol": "HUNT"
                     },
                     {
                       "u64": 2
@@ -200,115 +267,44 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "hunt_id"
+                        "symbol": "activated_at"
                       },
                       "val": {
-                        "u64": 1
+                        "u64": 0
                       }
                     },
                     {
                       "key": {
-                        "symbol": "metadata"
+                        "symbol": "created_at"
                       },
                       "val": {
-                        "map": [
-                          {
-                            "key": {
-                              "symbol": "description"
-                            },
-                            "val": {
-                              "string": "Desc 2"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "image_uri"
-                            },
-                            "val": {
-                              "string": "ipfs://2"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "title"
-                            },
-                            "val": {
-                              "string": "NFT 2"
-                            }
-                          }
-                        ]
+                        "u64": 1700000000
                       }
                     },
                     {
                       "key": {
-                        "symbol": "minted_at"
+                        "symbol": "creator"
                       },
                       "val": {
-                        "u64": 1000
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                       }
                     },
                     {
                       "key": {
-                        "symbol": "nft_id"
+                        "symbol": "description"
                       },
                       "val": {
-                        "u64": 2
+                        "string": "Description"
                       }
                     },
                     {
                       "key": {
-                        "symbol": "owner"
+                        "symbol": "end_time"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                        "u64": 0
                       }
-                    }
-                  ]
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "NFT"
-                },
-                {
-                  "u64": 3
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "NFT"
                     },
-                    {
-                      "u64": 3
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "map": [
                     {
                       "key": {
                         "symbol": "hunt_id"
@@ -319,32 +315,57 @@
                     },
                     {
                       "key": {
-                        "symbol": "metadata"
+                        "symbol": "required_clues"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reward_config"
                       },
                       "val": {
                         "map": [
                           {
                             "key": {
-                              "symbol": "description"
+                              "symbol": "claimed_count"
                             },
                             "val": {
-                              "string": "Desc 3"
+                              "u32": 0
                             }
                           },
                           {
                             "key": {
-                              "symbol": "image_uri"
+                              "symbol": "max_winners"
                             },
                             "val": {
-                              "string": "ipfs://3"
+                              "u32": 0
                             }
                           },
                           {
                             "key": {
-                              "symbol": "title"
+                              "symbol": "nft_contract"
+                            },
+                            "val": "void"
+                          },
+                          {
+                            "key": {
+                              "symbol": "nft_enabled"
                             },
                             "val": {
-                              "string": "NFT 3"
+                              "bool": false
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "xlm_pool"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 0
+                              }
                             }
                           }
                         ]
@@ -352,26 +373,30 @@
                     },
                     {
                       "key": {
-                        "symbol": "minted_at"
+                        "symbol": "status"
                       },
                       "val": {
-                        "u64": 1000
+                        "vec": [
+                          {
+                            "symbol": "Draft"
+                          }
+                        ]
                       }
                     },
                     {
                       "key": {
-                        "symbol": "nft_id"
+                        "symbol": "title"
                       },
                       "val": {
-                        "u64": 3
+                        "string": "Test Hunt"
                       }
                     },
                     {
                       "key": {
-                        "symbol": "owner"
+                        "symbol": "total_clues"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        "u32": 0
                       }
                     }
                   ]
@@ -386,108 +411,7 @@
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "ONFT"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "ONFT"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "vec": [
-                    {
-                      "u64": 1
-                    },
-                    {
-                      "u64": 3
-                    }
-                  ]
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "ONFT"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "ONFT"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "vec": [
-                    {
-                      "u64": 2
-                    }
-                  ]
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": "ledger_key_contract_instance",
             "durability": "persistent"
           }
@@ -498,7 +422,7 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
                 "key": "ledger_key_contract_instance",
                 "durability": "persistent",
                 "val": {
@@ -543,20 +467,76 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
         "type_": "contract",
         "body": {
           "v0": {
             "topics": [
               {
-                "symbol": "NftMinted"
+                "symbol": "HuntCreated"
               },
               {
-                "u64": 3
+                "u64": 1
               }
             ],
             "data": {
               "map": [
+                {
+                  "key": {
+                    "symbol": "creator"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "hunt_id"
+                  },
+                  "val": {
+                    "u64": 1
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "title"
+                  },
+                  "val": {
+                    "string": "Test Hunt"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "HuntCreated"
+              },
+              {
+                "u64": 2
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "creator"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
                 {
                   "key": {
                     "symbol": "hunt_id"
@@ -567,59 +547,10 @@
                 },
                 {
                   "key": {
-                    "symbol": "metadata"
+                    "symbol": "title"
                   },
                   "val": {
-                    "map": [
-                      {
-                        "key": {
-                          "symbol": "description"
-                        },
-                        "val": {
-                          "string": "Desc 3"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "image_uri"
-                        },
-                        "val": {
-                          "string": "ipfs://3"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "title"
-                        },
-                        "val": {
-                          "string": "NFT 3"
-                        }
-                      }
-                    ]
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "minted_at"
-                  },
-                  "val": {
-                    "u64": 1000
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "nft_id"
-                  },
-                  "val": {
-                    "u64": 3
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "owner"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    "string": "Test Hunt"
                   }
                 }
               ]
