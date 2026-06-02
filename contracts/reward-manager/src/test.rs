@@ -171,6 +171,103 @@ mod test {
         });
     }
 
+    // ========== update_pool_config ==========
+
+    #[test]
+    fn test_update_pool_config_success() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 500).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            // Lower the minimum
+            RewardManager::update_pool_config(env.clone(), creator.clone(), 1, 100).unwrap();
+
+            let status = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+            assert_eq!(status.min_distribution_amount, 100);
+            // Creator field must not change
+            assert_eq!(status.creator, creator);
+        });
+    }
+
+    #[test]
+    fn test_update_pool_config_to_zero() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 1_000).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            // Remove the minimum entirely
+            RewardManager::update_pool_config(env.clone(), creator.clone(), 1, 0).unwrap();
+
+            let status = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+            assert_eq!(status.min_distribution_amount, 0);
+        });
+    }
+
+    #[test]
+    fn test_update_pool_config_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 500).unwrap();
+
+            let result =
+                RewardManager::update_pool_config(env.clone(), attacker.clone(), 1, 100);
+            assert_eq!(result, Err(RewardErrorCode::Unauthorized));
+
+            // Original value unchanged
+            let status = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+            assert_eq!(status.min_distribution_amount, 500);
+        });
+    }
+
+    #[test]
+    fn test_update_pool_config_pool_not_found() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let result =
+                RewardManager::update_pool_config(env.clone(), creator.clone(), 99, 100);
+            assert_eq!(result, Err(RewardErrorCode::PoolNotFound));
+        });
+    }
+
+    #[test]
+    fn test_update_pool_config_negative_amount() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 500).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            let result =
+                RewardManager::update_pool_config(env.clone(), creator.clone(), 1, -1);
+            assert_eq!(result, Err(RewardErrorCode::InvalidAmount));
+        });
+    }
+
     // ========== fund_reward_pool ==========
 
     #[test]

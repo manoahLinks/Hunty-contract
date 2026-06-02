@@ -129,6 +129,46 @@ impl RewardManager {
         Ok(())
     }
 
+    /// Updates the `min_distribution_amount` for an existing reward pool.
+    ///
+    /// Only the pool creator is authorized to call this. Useful when a creator
+    /// has underfunded the pool and needs to lower the minimum so distributions
+    /// can proceed.
+    ///
+    /// # Arguments
+    /// * `creator` - The pool creator (must match the stored creator)
+    /// * `hunt_id` - The hunt whose pool config to update
+    /// * `min_distribution_amount` - New minimum XLM per distribution (0 = no minimum)
+    ///
+    /// # Errors
+    /// * `PoolNotFound` - No pool exists for this hunt_id
+    /// * `Unauthorized` - Caller is not the pool creator
+    /// * `InvalidAmount` - min_distribution_amount is negative
+    pub fn update_pool_config(
+        env: Env,
+        creator: Address,
+        hunt_id: u64,
+        min_distribution_amount: i128,
+    ) -> Result<(), RewardErrorCode> {
+        creator.require_auth();
+
+        let mut config = Storage::get_pool_config(&env, hunt_id)
+            .ok_or(RewardErrorCode::PoolNotFound)?;
+
+        if creator != config.creator {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+
+        if min_distribution_amount < 0 {
+            return Err(RewardErrorCode::InvalidAmount);
+        }
+
+        config.min_distribution_amount = min_distribution_amount;
+        Storage::set_pool_config(&env, hunt_id, &config);
+
+        Ok(())
+    }
+
     /// Funds the reward pool for a specific hunt.
     ///
     /// The pool must have been created via `create_reward_pool` first.
