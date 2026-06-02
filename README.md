@@ -16,6 +16,11 @@ The beauty of Hunty lies in its simplicity and security. Answers are hashed on-c
 
 ## Game Overview
 
+### Leaderboard notes
+
+- **Scan limitation**: For gas safety, the on-chain `get_hunt_leaderboard` query scans a bounded number of player records (default cap in contract). For very popular hunts with many registrations, use the new paginated API `get_hunt_leaderboard_window` to page through registered players in windows and merge results off-chain to build a full top-N leaderboard.
+
+
 ### The Big Picture
 
 Hunty operates as a three-contract system where each contract has a specific role:

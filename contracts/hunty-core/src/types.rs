@@ -33,6 +33,7 @@ pub struct Hunt {
     pub status: HuntStatus,
     pub created_at: u64,
     pub activated_at: u64,
+    pub start_time: u64,
     pub end_time: u64,
     pub reward_config: RewardConfig,
     pub total_clues: u32,
@@ -103,6 +104,7 @@ impl Default for Location {
 #[derive(Clone, Debug)]
 pub struct StoredPlayerProgress {
     pub completed_clues: Vec<u32>,
+    pub required_completed_count: u32,
     pub total_score: u32,
     pub started_at: u64,
     pub completed_at: u64,
@@ -118,6 +120,7 @@ pub struct PlayerProgress {
     pub player: Address,
     pub hunt_id: u64,
     pub completed_clues: Vec<u32>,
+    pub required_completed_count: u32,
     pub total_score: u32,
     pub started_at: u64,
     pub completed_at: u64,
@@ -132,6 +135,7 @@ impl PlayerProgress {
             player,
             hunt_id,
             completed_clues: Vec::new(env),
+            required_completed_count: 0,
             total_score: 0,
             started_at: current_time,
             completed_at: 0,
@@ -145,6 +149,7 @@ impl PlayerProgress {
     pub fn to_stored(&self) -> StoredPlayerProgress {
         StoredPlayerProgress {
             completed_clues: self.completed_clues.clone(),
+            required_completed_count: self.required_completed_count,
             total_score: self.total_score,
             started_at: self.started_at,
             completed_at: self.completed_at,
@@ -160,6 +165,7 @@ impl PlayerProgress {
             player,
             hunt_id,
             completed_clues: stored.completed_clues,
+            required_completed_count: stored.required_completed_count,
             total_score: stored.total_score,
             started_at: stored.started_at,
             completed_at: stored.completed_at,
@@ -178,9 +184,12 @@ impl PlayerProgress {
         false
     }
 
-    pub fn complete_clue(&mut self, _env: &Env, clue_id: u32, points: u32) {
+    pub fn complete_clue(&mut self, _env: &Env, clue_id: u32, points: u32, is_required: bool) {
         if !self.has_completed_clue(clue_id) {
             self.completed_clues.push_back(clue_id);
+            if is_required {
+                self.required_completed_count += 1;
+            }
             self.total_score += points;
         }
     }
@@ -196,7 +205,9 @@ impl PlayerProgress {
 
 impl Hunt {
     pub fn is_active(&self, current_time: u64) -> bool {
-        self.status == HuntStatus::Active && (self.end_time == 0 || current_time < self.end_time)
+        self.status == HuntStatus::Active
+            && (self.start_time == 0 || current_time >= self.start_time)
+            && (self.end_time == 0 || current_time < self.end_time)
     }
 
     pub fn has_rewards_available(&self) -> bool {
@@ -277,14 +288,13 @@ pub struct RewardClaimedEvent {
     pub nft_awarded: bool,
 }
 
-/// Emitted when a clue is added. Does not expose the answer hash.
+/// Emitted when a clue is added. Does not expose the question or answer hash.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct ClueAddedEvent {
     pub hunt_id: u64,
     pub clue_id: u32,
     pub creator: Address,
-    pub question: String,
     pub points: u32,
     pub is_required: bool,
 }
@@ -328,6 +338,31 @@ pub struct LeaderboardEntry {
     pub score: u32,
     pub completed_at: u64,
     pub is_completed: bool,
+    pub queried_at: u64,
+}
+
+/// Lightweight row returned when scanning a window of players. Includes the
+/// original player index so callers can merge/paginate results client-side.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaderboardRow {
+    pub index: u32,
+    pub player: Address,
+    pub score: u32,
+    pub completed_at: u64,
+    pub is_completed: bool,
+}
+
+/// Result of a single leaderboard scan window. Clients may call repeatedly
+/// with `next_index` until `finished` is true, merging `entries` off-chain to
+/// produce a global top-N leaderboard without requiring a single large on-chain
+/// scan (which would be expensive in gas).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaderboardWindow {
+    pub entries: Vec<LeaderboardRow>,
+    pub next_index: u32,
+    pub finished: bool,
     pub queried_at: u64,
 }
 

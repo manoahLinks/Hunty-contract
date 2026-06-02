@@ -243,6 +243,13 @@ mod test {
         });
     }
 
+    /// Verifies that `fund_reward_pool` rejects any caller who is not the pool creator.
+    ///
+    /// A third-party address (attacker) with sufficient token balance attempts to fund a pool
+    /// they did not create. The call must return `Unauthorized` and leave the attacker's
+    /// balance untouched — no tokens should be transferred.
+    ///
+    /// Closes #195.
     #[test]
     fn test_fund_reward_pool_unauthorized_funder() {
         let env = Env::default();
@@ -262,7 +269,7 @@ mod test {
             assert_eq!(result, Err(RewardErrorCode::Unauthorized));
         });
 
-        // Attacker's balance unchanged
+        // Attacker's balance unchanged — no tokens were transferred
         assert_eq!(get_balance(&env, &token_address, &attacker), 10_000);
     }
 

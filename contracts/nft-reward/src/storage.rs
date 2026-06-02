@@ -17,6 +17,12 @@ impl Storage {
         (Self::OWNER_NFTS_KEY, owner.clone())
     }
 
+    /// Removes an NFT from persistent storage.
+    pub fn remove_nft(env: &Env, nft_id: u64) {
+        let key = Self::nft_key(nft_id);
+        env.storage().persistent().remove(&key);
+    }
+
     /// Saves an NFT to persistent storage.
     pub fn save_nft(env: &Env, nft: &NftData) {
         let key = Self::nft_key(nft.nft_id);
