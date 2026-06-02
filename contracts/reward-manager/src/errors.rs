@@ -21,9 +21,6 @@ pub enum RewardErrorCode {
     BelowMinimumAmount = 11,
     /// Contract initialization can only happen once.
     AlreadyInitialized = 12,
-    /// The contract's actual on-chain XLM balance is less than what the
-    /// tracked `pool_balance` field implies. This indicates the tracked
-    /// pool state and the real contract balance have diverged, and
-    /// distributing rewards would otherwise panic at transfer time.
-    PoolBalanceDivergence = 13,
+    /// hunt_id does not exist in HuntyCore (validated via cross-contract call).
+    HuntNotFound = 13,
 }

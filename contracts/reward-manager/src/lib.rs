@@ -1,5 +1,5 @@
 #![cfg_attr(not(test), no_std)]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, IntoVal, Symbol, Val, Vec};
 
 pub use crate::errors::RewardErrorCode;
 pub use crate::types::{
@@ -83,6 +83,23 @@ impl RewardManager {
         Ok(())
     }
 
+    /// Sets the optional HuntyCore contract address used to validate hunt_id existence
+    /// in `create_reward_pool`. When set, pool creation will be rejected for unknown
+    /// hunt IDs. If not set, hunt_id is assumed caller-trusted.
+    pub fn set_hunty_core(
+        env: Env,
+        admin: Address,
+        hunty_core: Address,
+    ) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+        Storage::set_hunty_core(&env, &hunty_core);
+        Ok(())
+    }
+
     /// Creates a reward pool for a specific hunt.
     ///
     /// Must be called before `fund_reward_pool`. Only the creator is authorized
@@ -96,6 +113,7 @@ impl RewardManager {
     /// # Errors
     /// * `PoolAlreadyExists` - A pool already exists for this hunt_id
     /// * `InvalidAmount` - min_distribution_amount is negative
+    /// * `HuntNotFound` - hunt_id does not exist in HuntyCore (only when `set_hunty_core` has been called)
     pub fn create_reward_pool(
         env: Env,
         creator: Address,
@@ -110,6 +128,23 @@ impl RewardManager {
 
         if Storage::get_pool_config(&env, hunt_id).is_some() {
             return Err(RewardErrorCode::PoolAlreadyExists);
+        }
+
+        // Validate hunt_id exists in HuntyCore when the core contract is configured.
+        // If not configured, hunt_id is caller-trusted (no cross-contract call is made).
+        if let Some(hunty_core) = Storage::get_hunty_core(&env) {
+            let mut args: Vec<Val> = Vec::new(&env);
+            args.push_back(hunt_id.into_val(&env));
+            // get_hunt_info returns Result<Hunt, HuntErrorCode>.
+            // We use Val as the success type to avoid importing Hunt from hunty-core.
+            // Any non-Ok(Ok(_)) result means the hunt doesn't exist or the call failed.
+            let hunt_exists = matches!(
+                env.try_invoke_contract::<Val, Val>(&hunty_core, &Symbol::new(&env, "get_hunt_info"), args),
+                Ok(Ok(_))
+            );
+            if !hunt_exists {
+                return Err(RewardErrorCode::HuntNotFound);
+            }
         }
 
         let config = RewardPoolConfig {

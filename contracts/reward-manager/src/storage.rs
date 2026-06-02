@@ -14,7 +14,7 @@ impl Storage {
     const POOL_CFG_KEY: soroban_sdk::Symbol = symbol_short!("PCFG");
     const POOL_DEP_KEY: soroban_sdk::Symbol = symbol_short!("PDEP");
     const POOL_DST_KEY: soroban_sdk::Symbol = symbol_short!("PDST");
-    const TOTAL_XLM_DST_KEY: soroban_sdk::Symbol = symbol_short!("TXLD");
+    const HUNTY_CORE_KEY: soroban_sdk::Symbol = symbol_short!("HCORE");
 
     // ========== XLM Token Address ==========
 
@@ -32,6 +32,16 @@ impl Storage {
 
     pub fn get_xlm_token(env: &Env) -> Option<Address> {
         env.storage().persistent().get(&Self::XLM_TOKEN_KEY)
+    }
+
+    // ========== HuntyCore Contract Address (optional) ==========
+
+    pub fn set_hunty_core(env: &Env, address: &Address) {
+        env.storage().persistent().set(&Self::HUNTY_CORE_KEY, address);
+    }
+
+    pub fn get_hunty_core(env: &Env) -> Option<Address> {
+        env.storage().persistent().get(&Self::HUNTY_CORE_KEY)
     }
 
     // ========== Default NFT Contract Address ==========
