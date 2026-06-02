@@ -361,7 +361,8 @@ impl HuntyCore {
             return Err(HuntErrorCode::Unauthorized);
         }
 
-        if hunt.status != HuntStatus::Draft {
+        // Allow re-activation from Paused (issue #91) as well as initial activation from Draft.
+        if hunt.status != HuntStatus::Draft && hunt.status != HuntStatus::Paused {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
 
@@ -410,7 +411,9 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
 
-        hunt.status = HuntStatus::Draft;
+        // Issue #91: use Paused, not Draft, so a temporarily stopped hunt
+        // is distinguishable from one that was never activated.
+        hunt.status = HuntStatus::Paused;
 
         Storage::save_hunt(&env, &hunt);
 

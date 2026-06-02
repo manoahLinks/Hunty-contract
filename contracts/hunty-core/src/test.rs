@@ -1214,11 +1214,142 @@ mod test {
             // Activate hunt
             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
 
-            // Deactivate hunt
+            // Deactivate hunt — status must be Paused, not Draft (issue #91).
             HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
 
             let hunt = Storage::get_hunt(env, hunt_id).unwrap();
-            assert_eq!(hunt.status, HuntStatus::Draft);
+            assert_eq!(hunt.status, HuntStatus::Paused);
+        });
+    }
+
+    // ── Issue #91: Paused-state tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_deactivate_sets_paused_not_draft() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(), creator.clone(),
+                String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+            ).unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.status, HuntStatus::Paused);
+            assert_ne!(hunt.status, HuntStatus::Draft);
+        });
+    }
+
+    #[test]
+    fn test_reactivate_from_paused_succeeds() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(), creator.clone(),
+                String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+            ).unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.status, HuntStatus::Active);
+        });
+    }
+
+    #[test]
+    fn test_deactivate_draft_hunt_fails() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(), creator.clone(),
+                String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+            ).unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
+            // Hunt is Draft — deactivate must reject it.
+            let err = HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap_err();
+            assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+        });
+    }
+
+    #[test]
+    fn test_cannot_add_clue_to_paused_hunt() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(), creator.clone(),
+                String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+            ).unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 1, true).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            let err = HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false).unwrap_err();
+            assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+        });
+    }
+
+    #[test]
+    fn test_register_player_blocked_when_paused() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(), creator.clone(),
+                String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+            ).unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            let err = HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
+            assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+        });
+    }
+
+    #[test]
+    fn test_cancel_from_paused_succeeds() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(), creator.clone(),
+                String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+            ).unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.status, HuntStatus::Cancelled);
         });
     }
 

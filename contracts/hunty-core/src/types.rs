@@ -7,6 +7,11 @@ pub enum HuntStatus {
     Active,
     Completed,
     Cancelled,
+    /// Hunt was active but the creator temporarily stopped it.
+    /// Distinct from Draft (never activated) so re-registration logic and
+    /// UIs can unambiguously communicate "this hunt is paused, not new".
+    /// Valid transitions: Paused → Active (re-activate), Paused → Cancelled.
+    Paused,
 }
 
 #[contracttype]
