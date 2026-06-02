@@ -751,14 +751,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "required_completed_count"
-                      },
-                      "val": {
-                        "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "reward_claimed"
                       },
                       "val": {
@@ -863,14 +855,6 @@
                       },
                       "val": {
                         "bool": false
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "required_completed_count"
-                      },
-                      "val": {
-                        "u32": 0
                       }
                     },
                     {
@@ -983,14 +967,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "required_completed_count"
-                      },
-                      "val": {
-                        "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "reward_claimed"
                       },
                       "val": {
@@ -1099,14 +1075,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "required_completed_count"
-                      },
-                      "val": {
-                        "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "reward_claimed"
                       },
                       "val": {
@@ -1211,14 +1179,6 @@
                       },
                       "val": {
                         "bool": false
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "required_completed_count"
-                      },
-                      "val": {
-                        "u32": 0
                       }
                     },
                     {
@@ -1367,10 +1327,14 @@
                           "map": [
                             {
                               "key": {
-                                "symbol": "answer_hash"
+                                "symbol": "answer_hashes"
                               },
                               "val": {
-                                "bytes": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+                                "vec": [
+                                  {
+                                    "bytes": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+                                  }
+                                ]
                               }
                             },
                             {

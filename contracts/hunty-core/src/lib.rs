@@ -4,10 +4,10 @@ use alloc::string::String as StdString;
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
-    AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, ClueRemovedEvent,
-    Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
-    HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
-    PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig,
+    AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueAliasesAddedEvent, ClueCompletedEvent,
+    ClueInfo, Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent,
+    HuntCreatedEvent, HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry,
+    PlayerProgress, PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig,
 };
 use reward_manager::RewardErrorCode;
 use soroban_sdk::{
@@ -212,10 +212,12 @@ impl HuntyCore {
         let answer_hash =
             Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
         let clue_id = Storage::next_clue_id(&env, hunt_id);
+        let mut answer_hashes: Vec<BytesN<32>> = Vec::new(&env);
+        answer_hashes.push_back(answer_hash);
         let clue = Clue {
             clue_id,
             question: question.clone(),
-            answer_hash,
+            answer_hashes,
             points,
             is_required,
         };
@@ -238,38 +240,55 @@ impl HuntyCore {
         Ok(clue_id)
     }
 
-    /// Removes a clue from a draft hunt. Only the hunt creator can remove clues.
-    pub fn remove_clue(
+    /// Adds alternative acceptable answers to an existing clue (synonyms).
+    /// Only the hunt creator can add aliases, and only while the hunt is in Draft status.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt containing the clue
+    /// * `clue_id` - The existing clue to add aliases to
+    /// * `answers` - Alternative answers that should also be accepted
+    ///
+    /// # Errors
+    /// * `HuntNotFound` - Hunt does not exist
+    /// * `InvalidHuntStatus` - Hunt is not in Draft
+    /// * `Unauthorized` - Caller is not the hunt creator
+    /// * `ClueNotFound` - Clue does not exist
+    /// * `InvalidAnswer` - Any answer is empty or exceeds max length
+    pub fn add_clue_aliases(
         env: Env,
         hunt_id: u64,
         clue_id: u32,
-        caller: Address,
+        answers: Vec<String>,
     ) -> Result<(), HuntErrorCode> {
-        caller.require_auth();
-        let mut hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
+        let hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
         if hunt.status != HuntStatus::Draft {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
-        if caller != hunt.creator {
-            return Err(HuntErrorCode::Unauthorized);
-        }
+        hunt.creator.require_auth();
 
-        let clue =
+        let mut clue =
             Storage::get_clue_or_error(&env, hunt_id, clue_id).map_err(HuntErrorCode::from)?;
-        Storage::remove_clue(&env, hunt_id, clue_id);
-        hunt.total_clues = hunt.total_clues.saturating_sub(1);
-        if clue.is_required {
-            hunt.required_clues = hunt.required_clues.saturating_sub(1);
-        }
-        Storage::save_hunt(&env, &hunt);
 
-        let event = ClueRemovedEvent {
+        for i in 0..answers.len() {
+            let answer = answers.get(i).unwrap();
+            let hash =
+                Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
+            clue.answer_hashes.push_back(hash);
+        }
+
+        Storage::save_clue(&env, hunt_id, &clue);
+
+        let event = ClueAliasesAddedEvent {
             hunt_id,
             clue_id,
-            creator: caller,
+            creator: hunt.creator.clone(),
+            aliases_count: answers.len(),
         };
-        env.events()
-            .publish((Symbol::new(&env, "ClueRemoved"), hunt_id, clue_id), event);
+        env.events().publish(
+            (Symbol::new(&env, "ClueAliasesAdded"), hunt_id, clue_id),
+            event,
+        );
 
         Ok(())
     }
@@ -909,10 +928,16 @@ impl HuntyCore {
         let submitted_hash =
             Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
 
-        if submitted_hash != clue.answer_hash {
-            // Answer is incorrect - record attempt and emit analytics event
-            let attempt_number = progress.record_attempt(clue_id);
-            Storage::save_player_progress(&env, &progress);
+        let mut answer_match = false;
+        for i in 0..clue.answer_hashes.len() {
+            if submitted_hash == clue.answer_hashes.get(i).unwrap() {
+                answer_match = true;
+                break;
+            }
+        }
+
+        if !answer_match {
+            // Answer is incorrect - emit analytics event and return error
             let incorrect_event = AnswerIncorrectEvent {
                 hunt_id,
                 player: player.clone(),

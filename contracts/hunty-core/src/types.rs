@@ -45,13 +45,14 @@ pub struct Hunt {
     pub required_clues: u32,
 }
 
-/// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
+/// Stored clue with SHA256 answer hashes (supports multiple acceptable answers).
+/// Hashes are never exposed via get_clue/list_clues or events.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Clue {
     pub clue_id: u32,
     pub question: String,
-    pub answer_hash: BytesN<32>,
+    pub answer_hashes: Vec<BytesN<32>>,
     pub points: u32,
     pub is_required: bool,
 }
@@ -312,6 +313,16 @@ pub struct ClueRemovedEvent {
     pub hunt_id: u64,
     pub clue_id: u32,
     pub creator: Address,
+}
+
+/// Emitted when alternative acceptable answers are added to an existing clue.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClueAliasesAddedEvent {
+    pub hunt_id: u64,
+    pub clue_id: u32,
+    pub creator: Address,
+    pub aliases_count: u32,
 }
 
 /// Emitted when a player registers for an active hunt.

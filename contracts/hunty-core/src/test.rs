@@ -583,7 +583,7 @@ mod test {
             let cid =
                 HuntyCore::add_clue(env.clone(), hid, question.clone(), answer1, 5, false).unwrap();
             let c = Storage::get_clue(env, hid, cid).unwrap();
-            let h1 = c.answer_hash;
+            let h1 = c.answer_hashes.get(0).unwrap();
             let hid2 = HuntyCore::create_hunt(
                 env.clone(),
                 Address::generate(&env),
@@ -596,7 +596,7 @@ mod test {
             let _cid2 =
                 HuntyCore::add_clue(env.clone(), hid2, question, answer2, 5, false).unwrap();
             let c2 = Storage::get_clue(env, hid2, _cid2).unwrap();
-            let h2 = c2.answer_hash;
+            let h2 = c2.answer_hashes.get(0).unwrap();
             (h1, h2)
         });
 
@@ -972,6 +972,344 @@ mod test {
         });
 
         assert_eq!(err, HuntErrorCode::InvalidQuestion);
+    }
+
+    // ========== add_clue_aliases() Tests ==========
+
+    #[test]
+    fn test_add_clue_aliases_success() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        let cid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hid,
+                String::from_str(env, "Capital of USA?"),
+                String::from_str(env, "Washington"),
+                10,
+                true,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            let aliases = Vec::from_array(
+                env,
+                [
+                    String::from_str(env, "Washington D.C."),
+                    String::from_str(env, "DC"),
+                ],
+            );
+            HuntyCore::add_clue_aliases(env.clone(), hid, cid, aliases).unwrap();
+            let clue = Storage::get_clue(env, hid, cid).unwrap();
+            assert_eq!(clue.answer_hashes.len(), 3);
+        });
+    }
+
+    #[test]
+    fn test_add_clue_aliases_answers_accepted() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Geo Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        let cid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Capital of USA?"),
+                String::from_str(env, "Washington"),
+                10,
+                true,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            let aliases = Vec::from_array(
+                env,
+                [
+                    String::from_str(env, "Washington D.C."),
+                    String::from_str(env, "DC"),
+                ],
+            );
+            HuntyCore::add_clue_aliases(env.clone(), hunt_id, cid, aliases).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                String::from_str(env, "Washington"),
+            )
+            .unwrap();
+        });
+        let progress = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap()
+        });
+        assert!(progress.is_completed);
+
+        // Now test alias answers work — register a new player for each alias
+        for alias in ["Washington D.C.", "DC"] {
+            let p = Address::generate(&env);
+            env.mock_all_auths();
+            as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::register_player(env.clone(), hunt_id, p.clone()).unwrap();
+            });
+            env.mock_all_auths();
+            as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::submit_answer(
+                    env.clone(),
+                    hunt_id,
+                    1,
+                    p.clone(),
+                    String::from_str(env, alias),
+                )
+                .unwrap();
+            });
+            let progress = as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::get_player_progress(env.clone(), hunt_id, p.clone()).unwrap()
+            });
+            assert!(progress.is_completed);
+        }
+    }
+
+    #[test]
+    fn test_add_clue_aliases_hunt_not_found() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let aliases = Vec::from_array(&env, [String::from_str(&env, "alias")]);
+
+        let err = with_core_contract(&env, |env, _cid| {
+            HuntyCore::add_clue_aliases(env.clone(), 9999, 1, aliases).unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::HuntNotFound);
+    }
+
+    #[test]
+    fn test_add_clue_aliases_clue_not_found() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+
+        let err = with_core_contract(&env, |env, _cid| {
+            let hid = HuntyCore::create_hunt(
+                env.clone(),
+                creator,
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            let aliases = Vec::from_array(env, [String::from_str(env, "alias")]);
+            HuntyCore::add_clue_aliases(env.clone(), hid, 999, aliases).unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::ClueNotFound);
+    }
+
+    #[test]
+    fn test_add_clue_aliases_invalid_hunt_status() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        let cid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hid,
+                String::from_str(env, "Q"),
+                String::from_str(env, "a"),
+                1,
+                true,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            let mut h = Storage::get_hunt(env, hid).unwrap();
+            h.status = HuntStatus::Active;
+            Storage::save_hunt(env, &h);
+        });
+        env.mock_all_auths();
+        let err = as_core_contract(&env, &contract_id, |env| {
+            let aliases = Vec::from_array(env, [String::from_str(env, "alias")]);
+            HuntyCore::add_clue_aliases(env.clone(), hid, cid, aliases).unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+    }
+
+    #[test]
+    fn test_add_clue_aliases_preserves_existing_hashes() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        let cid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hid,
+                String::from_str(env, "Q"),
+                String::from_str(env, "original"),
+                5,
+                true,
+            )
+            .unwrap()
+        });
+        let original_hash = as_core_contract(&env, &contract_id, |env| {
+            let clue_before = Storage::get_clue(env, hid, cid).unwrap();
+            clue_before.answer_hashes.get(0).unwrap()
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            let aliases = Vec::from_array(
+                env,
+                [String::from_str(env, "alias1"), String::from_str(env, "alias2")],
+            );
+            HuntyCore::add_clue_aliases(env.clone(), hid, cid, aliases).unwrap();
+            let clue_after = Storage::get_clue(env, hid, cid).unwrap();
+            assert_eq!(clue_after.answer_hashes.len(), 3);
+            assert_eq!(clue_after.answer_hashes.get(0).unwrap(), original_hash);
+        });
+    }
+
+    #[test]
+    fn test_add_clue_aliases_empty_answer_fails() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        let cid = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hid,
+                String::from_str(env, "Q"),
+                String::from_str(env, "a"),
+                1,
+                true,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        let err = as_core_contract(&env, &contract_id, |env| {
+            let aliases =
+                Vec::from_array(env, [String::from_str(env, ""), String::from_str(env, "valid")]);
+            HuntyCore::add_clue_aliases(env.clone(), hid, cid, aliases).unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::InvalidAnswer);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_add_clue_aliases_creator_only() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        // Do NOT mock auth — require_auth(attacker) will panic
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let aliases = Vec::from_array(&env, [String::from_str(&env, "alias")]);
+
+        with_core_contract(&env, |env, _cid| {
+            let hid = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            let cid = HuntyCore::add_clue(
+                env.clone(),
+                hid,
+                String::from_str(env, "Q"),
+                String::from_str(env, "a"),
+                1,
+                true,
+            )
+            .unwrap();
+            let _ = HuntyCore::add_clue_aliases(env.clone(), hid, cid, aliases);
+        });
     }
 
     #[test]
@@ -1707,6 +2045,7 @@ mod test {
             let err = HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
             assert_eq!(err, HuntErrorCode::DuplicateRegistration);
 
+            Ok::<(), HuntErrorCode>(())
         });
     }
 
