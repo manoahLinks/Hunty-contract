@@ -426,15 +426,6 @@ impl HuntyCore {
 
     pub fn get_hunt_info(env: Env, hunt_id: u64) -> Result<Hunt, HuntErrorCode> {
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
-
-        match hunt.status {
-            HuntStatus::Draft
-            | HuntStatus::Active
-            | HuntStatus::Completed
-            | HuntStatus::Cancelled => {}
-        }
-
-        // Return the full Hunt struct
         Ok(hunt)
     }
 
