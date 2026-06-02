@@ -652,6 +652,33 @@ mod test {
     }
 
     #[test]
+    fn test_distribute_rewards_propagates_nft_mint_failure() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, _) = setup(&env);
+        let player = Address::generate(&env);
+        let missing_nft_contract = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+
+            let config = RewardConfig {
+                xlm_amount: None,
+                nft_contract: Some(missing_nft_contract),
+                nft_title: soroban_sdk::String::from_str(&env, "NFT"),
+                nft_description: soroban_sdk::String::from_str(&env, "desc"),
+                nft_image_uri: soroban_sdk::String::from_str(&env, "uri"),
+                nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
+                nft_rarity: 0,
+                nft_tier: 0,
+            };
+
+            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            assert_eq!(result, Err(RewardErrorCode::NftMintFailed));
+        });
+    }
+
+    #[test]
     fn test_distribute_rewards_not_initialized() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();

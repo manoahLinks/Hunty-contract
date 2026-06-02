@@ -369,7 +369,7 @@ impl RewardManager {
                 reward_config.nft_hunt_title.clone(),
                 reward_config.nft_rarity,
                 reward_config.nft_tier,
-            ));
+            )?);
         }
 
         // All operations succeeded — update state atomically
