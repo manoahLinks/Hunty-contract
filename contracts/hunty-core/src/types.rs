@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,6 +108,7 @@ pub struct StoredPlayerProgress {
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
+    pub clue_attempts: Map<u32, u32>,
 }
 
 /// Public view of player progress, with `player` and `hunt_id` reconstructed from the key.
@@ -122,6 +123,7 @@ pub struct PlayerProgress {
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
+    pub clue_attempts: Map<u32, u32>,
 }
 
 impl PlayerProgress {
@@ -135,6 +137,7 @@ impl PlayerProgress {
             completed_at: 0,
             is_completed: false,
             reward_claimed: false,
+            clue_attempts: Map::new(env),
         }
     }
 
@@ -147,6 +150,7 @@ impl PlayerProgress {
             completed_at: self.completed_at,
             is_completed: self.is_completed,
             reward_claimed: self.reward_claimed,
+            clue_attempts: self.clue_attempts.clone(),
         }
     }
 
@@ -161,6 +165,7 @@ impl PlayerProgress {
             completed_at: stored.completed_at,
             is_completed: stored.is_completed,
             reward_claimed: stored.reward_claimed,
+            clue_attempts: stored.clue_attempts,
         }
     }
 
@@ -178,6 +183,14 @@ impl PlayerProgress {
             self.completed_clues.push_back(clue_id);
             self.total_score += points;
         }
+    }
+
+    /// Increments the attempt counter for a clue and returns the new attempt number.
+    pub fn record_attempt(&mut self, clue_id: u32) -> u32 {
+        let current = self.clue_attempts.get(clue_id).unwrap_or(0);
+        let next = current + 1;
+        self.clue_attempts.set(clue_id, next);
+        next
     }
 }
 
@@ -291,6 +304,7 @@ pub struct AnswerIncorrectEvent {
     pub player: Address,
     pub clue_id: u32,
     pub timestamp: u64,
+    pub attempt_number: u32,
 }
 
 /// Leaderboard entry for a single player in a hunt (read-only query result).

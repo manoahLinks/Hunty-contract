@@ -694,12 +694,15 @@ impl HuntyCore {
             Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
 
         if submitted_hash != clue.answer_hash {
-            // Answer is incorrect - emit analytics event and return error
+            // Answer is incorrect - record attempt and emit analytics event
+            let attempt_number = progress.record_attempt(clue_id);
+            Storage::save_player_progress(&env, &progress);
             let incorrect_event = AnswerIncorrectEvent {
                 hunt_id,
                 player: player.clone(),
                 clue_id,
                 timestamp: current_time,
+                attempt_number,
             };
             env.events().publish(
                 (Symbol::new(&env, "AnswerIncorrect"), hunt_id, clue_id),
