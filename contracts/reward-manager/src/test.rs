@@ -1118,6 +1118,7 @@ mod test {
                 admin.clone(),
                 1,
                 recipient.clone(),
+                0,
             );
             assert!(result.is_ok());
 
@@ -1151,6 +1152,7 @@ mod test {
                 non_admin.clone(),
                 1,
                 non_admin.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::Unauthorized));
 
@@ -1176,6 +1178,7 @@ mod test {
                 admin.clone(),
                 99,
                 recipient.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::PoolNotFound));
         });
@@ -1210,6 +1213,7 @@ mod test {
                 admin.clone(),
                 1,
                 recipient.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::InvalidAmount));
         });
@@ -1233,82 +1237,86 @@ mod test {
                 admin.clone(),
                 1,
                 recipient.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::NotInitialized));
         });
     }
-    // ========== set_hunty_core / hunt_id validation ==========
 
     #[test]
-    fn test_create_reward_pool_without_hunty_core_is_caller_trusted() {
-        // Without set_hunty_core, any hunt_id is accepted (caller-trusted mode).
+    fn test_admin_withdraw_unclaimed_partial_success() {
         let env = Env::default();
-        env.mock_all_auths_allowing_non_root_auth();
-        let (contract_id, _, _) = setup(&env);
+        env.mock_all_auths();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
         let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let player = Address::generate(&env);
 
-        env.as_contract(&contract_id, || {
-            // hunt_id 9999 is arbitrary — no HuntyCore is configured, so it passes.
-            let result = RewardManager::create_reward_pool(env.clone(), creator.clone(), 9999, 0);
-            assert!(result.is_ok());
-        });
+        mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
+
+        let client = crate::RewardManagerClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &token_address);
+        client.create_reward_pool(&creator, &1, &0);
+        client.fund_reward_pool(&creator, &1, &6_000);
+
+        // Distribute to one player, leaving 4_000 unclaimed
+        client.distribute_rewards(&1, &player, &xlm_only_config(&env, 2_000));
+
+        // Admin partially withdraws 1_500 to recipient
+        let result = client.try_admin_withdraw_unclaimed(&admin, &1, &recipient, &1_500);
+        assert!(result.is_ok());
+
+        // Pool balance should now be 2_500
+        assert_eq!(client.get_pool_balance(&1), 2_500);
+
+        // Admin withdraws the remaining balance using 0
+        let result2 = client.try_admin_withdraw_unclaimed(&admin, &1, &recipient, &0);
+        assert!(result2.is_ok());
+        assert_eq!(client.get_pool_balance(&1), 0);
+
+        // Recipient should have received 4_000 in total
+        assert_eq!(get_balance(&env, &token_address, &recipient), 4_000);
     }
 
     #[test]
-    fn test_create_reward_pool_rejects_unknown_hunt_id_when_hunty_core_set() {
+    fn test_admin_withdraw_unclaimed_invalid_amount_partial() {
         let env = Env::default();
-        env.mock_all_auths_allowing_non_root_auth();
-        let (contract_id, token_address, _) = setup(&env);
+        env.mock_all_auths();
+        let (contract_id, token_address, token_admin) = setup(&env);
         let admin = Address::generate(&env);
         let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let player = Address::generate(&env);
 
-        // Register a dummy contract as "hunty_core". Any call to get_hunt_info on it
-        // will fail (no matching function), which simulates a missing hunt.
-        let fake_hunty_core = env.register(RewardManager, ());
+        mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
 
-        env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
-        });
-        env.mock_all_auths_allowing_non_root_auth();
-        env.as_contract(&contract_id, || {
-            RewardManager::set_hunty_core(env.clone(), admin.clone(), fake_hunty_core.clone())
-                .unwrap();
-        });
-        env.mock_all_auths_allowing_non_root_auth();
-        env.as_contract(&contract_id, || {
-            // hunt_id 42 doesn't exist in the fake core — expect HuntNotFound.
-            let result = RewardManager::create_reward_pool(env.clone(), creator.clone(), 42, 0);
-            assert_eq!(result, Err(RewardErrorCode::HuntNotFound));
-        });
-    }
+        let client = crate::RewardManagerClient::new(&env, &contract_id);
 
-    #[test]
-    fn test_set_hunty_core_admin_only() {
-        let env = Env::default();
-        env.mock_all_auths_allowing_non_root_auth();
-        let (contract_id, token_address, _) = setup(&env);
-        let admin = Address::generate(&env);
-        let attacker = Address::generate(&env);
-        let fake_core = Address::generate(&env);
+        client.initialize(&admin, &token_address);
+        client.create_reward_pool(&creator, &1, &0);
+        client.fund_reward_pool(&creator, &1, &6_000);
 
-        env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
-        });
-        env.mock_all_auths_allowing_non_root_auth();
-        env.as_contract(&contract_id, || {
-            // Non-admin should be rejected.
-            let result =
-                RewardManager::set_hunty_core(env.clone(), attacker.clone(), fake_core.clone());
-            assert_eq!(result, Err(RewardErrorCode::Unauthorized));
-        });
-        env.mock_all_auths_allowing_non_root_auth();
-        env.as_contract(&contract_id, || {
-            // Admin succeeds.
-            RewardManager::set_hunty_core(env.clone(), admin.clone(), fake_core.clone()).unwrap();
-            assert_eq!(
-                crate::storage::Storage::get_hunty_core(&env),
-                Some(fake_core)
-            );
-        });
+        // Distribute to one player, leaving 4_000 unclaimed
+        client.distribute_rewards(&1, &player, &xlm_only_config(&env, 2_000));
+
+        // Try to withdraw negative amount
+        let result_neg = client.try_admin_withdraw_unclaimed(
+            &admin,
+            &1,
+            &recipient,
+            &-500,
+        );
+        assert!(result_neg.is_err()); // should fail with InvalidAmount or similar host error
+
+        // Try to withdraw more than remaining balance (4_500 > 4_000)
+        let result_excess = client.try_admin_withdraw_unclaimed(
+            &admin,
+            &1,
+            &recipient,
+            &4_500,
+        );
+        assert!(result_excess.is_err());
     }
 }

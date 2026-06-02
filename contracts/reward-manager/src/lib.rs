@@ -584,7 +584,13 @@ impl RewardManager {
         admin: Address,
         hunt_id: u64,
         recipient: Address,
+        amount: i128,
     ) -> Result<(), RewardErrorCode> {
+        if amount < 0 {
+            return Err(RewardErrorCode::InvalidAmount);
+        }
+        admin.require_auth();
+
         let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
         if configured_admin != admin {
             return Err(RewardErrorCode::Unauthorized);
@@ -595,7 +601,13 @@ impl RewardManager {
         Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
 
         let balance = Storage::get_pool_balance(&env, hunt_id);
-        if balance == 0 {
+        let withdraw_amount = if amount == 0 {
+            balance
+        } else {
+            amount
+        };
+
+        if withdraw_amount <= 0 || withdraw_amount > balance {
             return Err(RewardErrorCode::InvalidAmount);
         }
 
@@ -603,16 +615,16 @@ impl RewardManager {
 
         let contract_addr = env.current_contract_address();
         let client = soroban_sdk::token::Client::new(&env, &xlm_token);
-        client.transfer(&contract_addr, &recipient, &balance);
+        client.transfer(&contract_addr, &recipient, &withdraw_amount);
 
-        Storage::set_pool_balance(&env, hunt_id, 0);
+        Storage::set_pool_balance(&env, hunt_id, balance - withdraw_amount);
 
         env.events().publish(
             (symbol_short!("ADM_WDR"), hunt_id),
             AdminWithdrawEvent {
                 hunt_id,
                 admin,
-                amount: balance,
+                amount: withdraw_amount,
             },
         );
 
