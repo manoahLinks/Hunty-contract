@@ -182,7 +182,6 @@ impl HuntyCore {
             hunt_id,
             clue_id,
             creator: updated.creator.clone(),
-            question,
             points,
             is_required,
         };

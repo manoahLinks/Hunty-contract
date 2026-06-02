@@ -264,14 +264,13 @@ pub struct RewardClaimedEvent {
     pub nft_awarded: bool,
 }
 
-/// Emitted when a clue is added. Does not expose the answer hash.
+/// Emitted when a clue is added. Does not expose the question or answer hash.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct ClueAddedEvent {
     pub hunt_id: u64,
     pub clue_id: u32,
     pub creator: Address,
-    pub question: String,
     pub points: u32,
     pub is_required: bool,
 }
