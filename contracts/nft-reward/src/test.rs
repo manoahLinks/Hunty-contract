@@ -107,10 +107,16 @@ fn test_metadata_stored_correctly() {
     let nft_id = client.mint_reward_nft(&42, &player, &metadata);
     let nft = client.get_nft(&nft_id).unwrap();
 
-    assert_eq!(nft.metadata.title, String::from_str(&env, "Treasure Hunter Trophy"));
+    assert_eq!(
+        nft.metadata.title,
+        String::from_str(&env, "Treasure Hunter Trophy")
+    );
     assert_eq!(
         nft.metadata.description,
-        String::from_str(&env, "Awarded for completing the legendary treasure hunt in record time")
+        String::from_str(
+            &env,
+            "Awarded for completing the legendary treasure hunt in record time"
+        )
     );
     assert_eq!(
         nft.metadata.image_uri,
@@ -167,7 +173,13 @@ fn test_multiple_nfts_can_be_minted() {
         "Description for hunt 4",
         "Description for hunt 5",
     ];
-    let uris = ["ipfs://hunt1", "ipfs://hunt2", "ipfs://hunt3", "ipfs://hunt4", "ipfs://hunt5"];
+    let uris = [
+        "ipfs://hunt1",
+        "ipfs://hunt2",
+        "ipfs://hunt3",
+        "ipfs://hunt4",
+        "ipfs://hunt5",
+    ];
 
     for i in 0..5 {
         let metadata = create_metadata(&env, titles[i], descs[i], uris[i]);
@@ -230,12 +242,18 @@ fn test_get_nft_metadata_returns_complete_info() {
 
     assert_eq!(meta.nft_id, nft_id);
     assert_eq!(meta.hunt_id, 42);
-    assert_eq!(meta.hunt_title, String::from_str(&env, "Legendary City Hunt"));
+    assert_eq!(
+        meta.hunt_title,
+        String::from_str(&env, "Legendary City Hunt")
+    );
     assert_eq!(meta.completion_timestamp, 1000);
     assert_eq!(meta.completion_player, player);
     assert_eq!(meta.current_owner, player);
     assert_eq!(meta.title, String::from_str(&env, "Epic Hunt Trophy"));
-    assert_eq!(meta.description, String::from_str(&env, "Completed legendary hunt"));
+    assert_eq!(
+        meta.description,
+        String::from_str(&env, "Completed legendary hunt")
+    );
     assert_eq!(meta.image_uri, String::from_str(&env, "ipfs://trophy"));
     assert_eq!(meta.rarity, 4);
     assert_eq!(meta.tier, 1);
@@ -259,7 +277,10 @@ fn test_update_nft_metadata_owner_only() {
     );
 
     let nft = client.get_nft(&nft_id).unwrap();
-    assert_eq!(nft.metadata.description, String::from_str(&env, "Updated description"));
+    assert_eq!(
+        nft.metadata.description,
+        String::from_str(&env, "Updated description")
+    );
     assert_eq!(nft.metadata.image_uri, String::from_str(&env, "ipfs://new"));
     assert_eq!(nft.metadata.title, String::from_str(&env, "Original"));
 }

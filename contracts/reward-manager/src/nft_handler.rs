@@ -45,7 +45,10 @@ impl NftHandler {
             soroban_sdk::Symbol::new(env, "hunt_title"),
             hunt_title.into_val(env),
         );
-        metadata.set(soroban_sdk::Symbol::new(env, "rarity"), rarity.into_val(env));
+        metadata.set(
+            soroban_sdk::Symbol::new(env, "rarity"),
+            rarity.into_val(env),
+        );
         metadata.set(soroban_sdk::Symbol::new(env, "tier"), tier.into_val(env));
 
         let mut args = soroban_sdk::Vec::new(env);

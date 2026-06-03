@@ -269,7 +269,9 @@ impl Storage {
             return;
         }
 
-        env.storage().instance().set(&Self::clue_entry_key(hunt_id, count), &clue_id);
+        env.storage()
+            .instance()
+            .set(&Self::clue_entry_key(hunt_id, count), &clue_id);
         env.storage().instance().set(&count_key, &(count + 1));
         env.storage().instance().set(&exist_key, &());
     }
@@ -300,7 +302,9 @@ impl Storage {
             return;
         }
 
-        env.storage().persistent().set(&Self::player_entry_key(hunt_id, count), player);
+        env.storage()
+            .persistent()
+            .set(&Self::player_entry_key(hunt_id, count), player);
         env.storage().persistent().set(&count_key, &(count + 1));
         env.storage().persistent().set(&exist_key, &());
     }
@@ -384,9 +388,7 @@ impl Storage {
     // ========== Reward Manager Storage Functions ==========
 
     pub fn set_reward_manager(env: &Env, address: &Address) {
-        env.storage()
-            .instance()
-            .set(&Self::REWARD_MGR_KEY, address);
+        env.storage().instance().set(&Self::REWARD_MGR_KEY, address);
     }
 
     pub fn get_reward_manager(env: &Env) -> Option<Address> {

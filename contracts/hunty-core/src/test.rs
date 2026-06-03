@@ -1,5 +1,3 @@
-use crate::errors::HuntErrorCode;
-use crate::types::HuntStatistics;
 use crate::HuntyCore;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
@@ -26,7 +24,7 @@ fn test_get_hunt_statistics_mixed_completion_states() {
     let answer = String::from_str(&env, "a");
 
     // Register contract and create hunt
-    let contract_id = env.register_contract(None, HuntyCore);
+    let contract_id = env.register(HuntyCore, ());
     let hunt_id = execute_in_contract(&env, &contract_id, |env| {
         HuntyCore::create_hunt(
             env.clone(),
@@ -71,25 +69,11 @@ fn test_get_hunt_statistics_mixed_completion_states() {
     // Player1 and Player2 solve the required clue
     env.mock_all_auths();
     execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::submit_answer(
-            env.clone(),
-            hunt_id,
-            1,
-            player1.clone(),
-            answer.clone(),
-        )
-        .unwrap();
+        HuntyCore::submit_answer(env.clone(), hunt_id, 1, player1.clone(), answer.clone()).unwrap();
     });
     env.mock_all_auths();
     execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::submit_answer(
-            env.clone(),
-            hunt_id,
-            1,
-            player2.clone(),
-            answer.clone(),
-        )
-        .unwrap();
+        HuntyCore::submit_answer(env.clone(), hunt_id, 1, player2.clone(), answer.clone()).unwrap();
     });
 
     // Player3 remains incomplete (no submissions)

@@ -226,7 +226,8 @@ impl NftReward {
     ) -> Result<(), crate::errors::NftErrorCode> {
         updater.require_auth();
 
-        let mut nft = Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+        let mut nft =
+            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
 
         if nft.owner != updater {
             return Err(crate::errors::NftErrorCode::NotOwner);
@@ -238,10 +239,7 @@ impl NftReward {
 
         env.events().publish(
             (Symbol::new(&env, "NftMetadataUpdated"), nft_id),
-            NftMetadataUpdatedEvent {
-                nft_id,
-                updater,
-            },
+            NftMetadataUpdatedEvent { nft_id, updater },
         );
 
         Ok(())

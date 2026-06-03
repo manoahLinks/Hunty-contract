@@ -899,10 +899,7 @@ impl HuntyCore {
 
     /// Returns aggregate statistics for a hunt (read-only): total players, completion rate, average score.
     /// Returns error if hunt does not exist.
-    pub fn get_hunt_statistics(
-        env: Env,
-        hunt_id: u64,
-    ) -> Result<HuntStatistics, HuntErrorCode> {
+    pub fn get_hunt_statistics(env: Env, hunt_id: u64) -> Result<HuntStatistics, HuntErrorCode> {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let players = Storage::get_hunt_players(&env, hunt_id);
         let total_players = players.len() as u32;

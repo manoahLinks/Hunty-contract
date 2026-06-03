@@ -18,7 +18,13 @@ mod test {
     }
 
     /// Mints tokens to an address using the SAC admin.
-    fn mint_tokens(env: &Env, token_address: &Address, _admin: &Address, to: &Address, amount: i128) {
+    fn mint_tokens(
+        env: &Env,
+        token_address: &Address,
+        _admin: &Address,
+        to: &Address,
+        amount: i128,
+    ) {
         let client = token::StellarAssetClient::new(env, token_address);
         client.mint(to, &amount);
     }
@@ -98,7 +104,8 @@ mod test {
         });
         env.mock_all_auths_allowing_non_root_auth();
         env.as_contract(&contract_id, || {
-            RewardManager::set_nft_reward_contract(env.clone(), admin, nft_contract.clone()).unwrap();
+            RewardManager::set_nft_reward_contract(env.clone(), admin, nft_contract.clone())
+                .unwrap();
             assert_eq!(Storage::get_nft_contract(&env), Some(nft_contract));
         });
     }
@@ -487,7 +494,11 @@ mod test {
 
         // Verify distribution tracked
         env.as_contract(&contract_id, || {
-            assert!(RewardManager::is_reward_distributed(env.clone(), 1, player.clone()));
+            assert!(RewardManager::is_reward_distributed(
+                env.clone(),
+                1,
+                player.clone()
+            ));
         });
     }
 
@@ -618,8 +629,7 @@ mod test {
                 nft_rarity: 0,
                 nft_tier: 0,
             };
-            let result =
-                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
         });
     }
@@ -645,8 +655,7 @@ mod test {
                 nft_rarity: 0,
                 nft_tier: 0,
             };
-            let result =
-                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
         });
     }
@@ -660,8 +669,7 @@ mod test {
 
         env.as_contract(&contract_id, || {
             let config = xlm_only_config(&env, 1_000);
-            let result =
-                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::NotInitialized));
         });
     }
@@ -776,10 +784,9 @@ mod test {
         // Distribute from hunt 1
         env.as_contract(&contract_id, || {
             let config = xlm_only_config(&env, 3_000);
-            assert!(RewardManager::distribute_rewards(
-                env.clone(), 1, player.clone(), config
-            )
-            .is_ok());
+            assert!(
+                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config).is_ok()
+            );
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 2_000);
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 2), 10_000);
         });
@@ -787,10 +794,9 @@ mod test {
         // Player can still claim from hunt 2 (separate pool)
         env.as_contract(&contract_id, || {
             let config = xlm_only_config(&env, 5_000);
-            assert!(RewardManager::distribute_rewards(
-                env.clone(), 2, player.clone(), config
-            )
-            .is_ok());
+            assert!(
+                RewardManager::distribute_rewards(env.clone(), 2, player.clone(), config).is_ok()
+            );
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 2), 5_000);
         });
     }
@@ -874,7 +880,10 @@ mod test {
 
             // First distribution uses 2_000 — leaves 1_000
             RewardManager::distribute_rewards(
-                env.clone(), 1, player1.clone(), xlm_only_config(&env, 2_000),
+                env.clone(),
+                1,
+                player1.clone(),
+                xlm_only_config(&env, 2_000),
             )
             .unwrap();
 
@@ -885,7 +894,10 @@ mod test {
 
             // Attempting to over-distribute also returns InsufficientPool
             let result = RewardManager::distribute_rewards(
-                env.clone(), 1, player2.clone(), xlm_only_config(&env, 2_000),
+                env.clone(),
+                1,
+                player2.clone(),
+                xlm_only_config(&env, 2_000),
             );
             assert_eq!(result, Err(RewardErrorCode::InsufficientPool));
         });
@@ -961,7 +973,8 @@ mod test {
 
             // Distribute to one player, leaving 4_000 unclaimed
             let player = Address::generate(&env);
-            RewardManager::distribute_rewards(env.clone(), 1, player, xlm_only_config(&env, 2_000)).unwrap();
+            RewardManager::distribute_rewards(env.clone(), 1, player, xlm_only_config(&env, 2_000))
+                .unwrap();
 
             // Admin withdraws the remaining 4_000 to recipient
             let result = RewardManager::admin_withdraw_unclaimed(
@@ -1051,7 +1064,10 @@ mod test {
 
             // Distribute all funds
             RewardManager::distribute_rewards(
-                env.clone(), 1, player.clone(), xlm_only_config(&env, 3_000),
+                env.clone(),
+                1,
+                player.clone(),
+                xlm_only_config(&env, 3_000),
             )
             .unwrap();
 

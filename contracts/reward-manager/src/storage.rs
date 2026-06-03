@@ -26,7 +26,9 @@ impl Storage {
     }
 
     pub fn set_xlm_token(env: &Env, address: &Address) {
-        env.storage().persistent().set(&Self::XLM_TOKEN_KEY, address);
+        env.storage()
+            .persistent()
+            .set(&Self::XLM_TOKEN_KEY, address);
     }
 
     pub fn get_xlm_token(env: &Env) -> Option<Address> {
@@ -77,7 +79,10 @@ impl Storage {
         env.storage().persistent().get(&key)
     }
 
-    fn distribution_record_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+    fn distribution_record_key(
+        hunt_id: u64,
+        player: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
         (Self::DIST_RECORD_KEY, hunt_id, player.clone())
     }
 

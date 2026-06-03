@@ -86,9 +86,7 @@ pub struct ValidationResult {
 impl RewardConfig {
     /// Returns true if XLM rewards are configured.
     pub fn has_xlm(&self) -> bool {
-        self.xlm_amount
-            .map(|a| a > 0)
-            .unwrap_or(false)
+        self.xlm_amount.map(|a| a > 0).unwrap_or(false)
     }
 
     /// Returns true if NFT rewards are configured.

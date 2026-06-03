@@ -2,13 +2,13 @@
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
 
 pub use crate::errors::RewardErrorCode;
+use crate::nft_handler::NftHandler;
+use crate::storage::Storage;
 pub use crate::types::{
     DistributionRecord, DistributionStatus, RewardConfig, RewardPoolConfig, RewardPoolStatus,
     ValidationResult,
 };
-use crate::storage::Storage;
 use crate::xlm_handler::XlmHandler;
-use crate::nft_handler::NftHandler;
 
 #[contract]
 pub struct RewardManager;
@@ -159,15 +159,14 @@ impl RewardManager {
             return Err(RewardErrorCode::InvalidAmount);
         }
 
-        let pool_config = Storage::get_pool_config(&env, hunt_id)
-            .ok_or(RewardErrorCode::PoolNotFound)?;
+        let pool_config =
+            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
 
         if funder != pool_config.creator {
             return Err(RewardErrorCode::Unauthorized);
         }
 
-        let xlm_token = Storage::get_xlm_token(&env)
-            .ok_or(RewardErrorCode::NotInitialized)?;
+        let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
 
         // Transfer XLM from funder to this contract
         let contract_addr = env.current_contract_address();
@@ -197,13 +196,9 @@ impl RewardManager {
 
     /// Refunds the entire remaining pool balance for a hunt back to the pool creator.
     /// Can only be called by the same creator that owns the pool.
-    pub fn refund_pool(
-        env: Env,
-        creator: Address,
-        hunt_id: u64,
-    ) -> Result<(), RewardErrorCode> {
-        let pool_config = Storage::get_pool_config(&env, hunt_id)
-            .ok_or(RewardErrorCode::PoolNotFound)?;
+    pub fn refund_pool(env: Env, creator: Address, hunt_id: u64) -> Result<(), RewardErrorCode> {
+        let pool_config =
+            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
         if creator != pool_config.creator {
             return Err(RewardErrorCode::Unauthorized);
         }
@@ -213,8 +208,7 @@ impl RewardManager {
             return Ok(());
         }
 
-        let xlm_token = Storage::get_xlm_token(&env)
-            .ok_or(RewardErrorCode::NotInitialized)?;
+        let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
 
         let contract_addr = env.current_contract_address();
         let client = soroban_sdk::token::Client::new(&env, &xlm_token);
@@ -325,8 +319,7 @@ impl RewardManager {
                 }
             }
 
-            let xlm_token = Storage::get_xlm_token(&env)
-                .ok_or(RewardErrorCode::NotInitialized)?;
+            let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
 
             let pool_balance = Storage::get_pool_balance(&env, hunt_id);
             if pool_balance < amount {
@@ -334,13 +327,7 @@ impl RewardManager {
             }
 
             let contract_addr = env.current_contract_address();
-            XlmHandler::distribute_xlm(
-                &env,
-                &xlm_token,
-                &contract_addr,
-                &player_address,
-                amount,
-            );
+            XlmHandler::distribute_xlm(&env, &xlm_token, &contract_addr, &player_address, amount);
             xlm_amount = amount;
             Storage::set_pool_balance(&env, hunt_id, pool_balance - amount);
 
@@ -378,10 +365,7 @@ impl RewardManager {
             &env,
             hunt_id,
             &player_address,
-            &DistributionRecord {
-                xlm_amount,
-                nft_id,
-            },
+            &DistributionRecord { xlm_amount, nft_id },
         );
 
         // Emit RewardsDistributed event
@@ -427,11 +411,7 @@ impl RewardManager {
     }
 
     /// Returns the distribution status for a hunt/player pair.
-    pub fn get_distribution_status(
-        env: Env,
-        hunt_id: u64,
-        player: Address,
-    ) -> DistributionStatus {
+    pub fn get_distribution_status(env: Env, hunt_id: u64, player: Address) -> DistributionStatus {
         let distributed = Storage::is_distributed(&env, hunt_id, &player);
         let record = Storage::get_distribution_record(&env, hunt_id, &player);
 

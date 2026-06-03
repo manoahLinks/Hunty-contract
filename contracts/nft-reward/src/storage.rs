@@ -31,9 +31,15 @@ impl Storage {
 
     /// Increments and returns the next NFT ID.
     pub fn next_nft_id(env: &Env) -> u64 {
-        let current: u64 = env.storage().persistent().get(&Self::NFT_COUNTER_KEY).unwrap_or(0);
+        let current: u64 = env
+            .storage()
+            .persistent()
+            .get(&Self::NFT_COUNTER_KEY)
+            .unwrap_or(0);
         let next = current + 1;
-        env.storage().persistent().set(&Self::NFT_COUNTER_KEY, &next);
+        env.storage()
+            .persistent()
+            .set(&Self::NFT_COUNTER_KEY, &next);
         next
     }
 
