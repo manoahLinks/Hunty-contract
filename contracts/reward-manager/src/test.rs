@@ -5,7 +5,7 @@ mod test {
     use crate::types::RewardConfig;
     use crate::RewardManager;
     use soroban_sdk::testutils::{Address as _, Ledger as _};
-    use soroban_sdk::{token, Address, Env};
+    use soroban_sdk::{symbol_short, token, Address, Env};
 
     /// Registers the RewardManager contract and a mock SAC token.
     /// Returns (contract_id, token_address, token_admin).
@@ -178,6 +178,103 @@ mod test {
         });
     }
 
+    // ========== update_pool_config ==========
+
+    #[test]
+    fn test_update_pool_config_success() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 500).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            // Lower the minimum
+            RewardManager::update_pool_config(env.clone(), creator.clone(), 1, 100).unwrap();
+
+            let status = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+            assert_eq!(status.min_distribution_amount, 100);
+            // Creator field must not change
+            assert_eq!(status.creator, creator);
+        });
+    }
+
+    #[test]
+    fn test_update_pool_config_to_zero() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 1_000).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            // Remove the minimum entirely
+            RewardManager::update_pool_config(env.clone(), creator.clone(), 1, 0).unwrap();
+
+            let status = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+            assert_eq!(status.min_distribution_amount, 0);
+        });
+    }
+
+    #[test]
+    fn test_update_pool_config_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 500).unwrap();
+
+            let result =
+                RewardManager::update_pool_config(env.clone(), attacker.clone(), 1, 100);
+            assert_eq!(result, Err(RewardErrorCode::Unauthorized));
+
+            // Original value unchanged
+            let status = RewardManager::get_reward_pool(env.clone(), 1).unwrap();
+            assert_eq!(status.min_distribution_amount, 500);
+        });
+    }
+
+    #[test]
+    fn test_update_pool_config_pool_not_found() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let result =
+                RewardManager::update_pool_config(env.clone(), creator.clone(), 99, 100);
+            assert_eq!(result, Err(RewardErrorCode::PoolNotFound));
+        });
+    }
+
+    #[test]
+    fn test_update_pool_config_negative_amount() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 500).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            let result =
+                RewardManager::update_pool_config(env.clone(), creator.clone(), 1, -1);
+            assert_eq!(result, Err(RewardErrorCode::InvalidAmount));
+        });
+    }
+
     // ========== fund_reward_pool ==========
 
     #[test]
@@ -250,6 +347,13 @@ mod test {
         });
     }
 
+    /// Verifies that `fund_reward_pool` rejects any caller who is not the pool creator.
+    ///
+    /// A third-party address (attacker) with sufficient token balance attempts to fund a pool
+    /// they did not create. The call must return `Unauthorized` and leave the attacker's
+    /// balance untouched — no tokens should be transferred.
+    ///
+    /// Closes #195.
     #[test]
     fn test_fund_reward_pool_unauthorized_funder() {
         let env = Env::default();
@@ -269,8 +373,26 @@ mod test {
             assert_eq!(result, Err(RewardErrorCode::Unauthorized));
         });
 
-        // Attacker's balance unchanged
+        // Attacker's balance unchanged — no tokens were transferred
         assert_eq!(get_balance(&env, &token_address, &attacker), 10_000);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_fund_reward_pool_requires_creator_auth() {
+        let env = Env::default();
+        // Do NOT mock auths here to test require_auth rejection
+        let (contract_id, token_address, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            crate::storage::Storage::set_pool_config(&env, 1, &crate::types::RewardPoolConfig {
+                creator: creator.clone(),
+                min_distribution_amount: 0,
+            });
+            let _ = RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 1_000);
+        });
     }
 
     #[test]
@@ -437,6 +559,7 @@ mod test {
             let result = RewardManager::validate_pool(env.clone(), 99, 1_000);
             assert!(!result.is_valid);
             assert_eq!(result.balance, 0);
+            assert_eq!(result.required, 1_000);
         });
     }
 
@@ -661,6 +784,33 @@ mod test {
     }
 
     #[test]
+    fn test_distribute_rewards_propagates_nft_mint_failure() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, _) = setup(&env);
+        let player = Address::generate(&env);
+        let missing_nft_contract = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+
+            let config = RewardConfig {
+                xlm_amount: None,
+                nft_contract: Some(missing_nft_contract),
+                nft_title: soroban_sdk::String::from_str(&env, "NFT"),
+                nft_description: soroban_sdk::String::from_str(&env, "desc"),
+                nft_image_uri: soroban_sdk::String::from_str(&env, "uri"),
+                nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
+                nft_rarity: 0,
+                nft_tier: 0,
+            };
+
+            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            assert_eq!(result, Err(RewardErrorCode::NftMintFailed));
+        });
+    }
+
+    #[test]
     fn test_distribute_rewards_not_initialized() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
@@ -834,6 +984,31 @@ mod test {
     }
 
     #[test]
+    fn test_get_distribution_status_ignores_stale_bool_flag() {
+        let env = Env::default();
+        let (contract_id, _, _) = setup(&env);
+        let player = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let record = crate::types::DistributionRecord {
+                xlm_amount: 2_000,
+                nft_id: None,
+            };
+            Storage::set_distribution_record(&env, 1, &player, &record);
+            Storage::set_distributed(&env, 1, &player);
+
+            // Simulate stale state: the record remains but the separate boolean flag disappears.
+            let dist_key = (symbol_short!("DIST"), 1u64, player.clone());
+            env.storage().persistent().remove(&dist_key);
+
+            let status = RewardManager::get_distribution_status(env.clone(), 1, player.clone());
+            assert!(status.distributed);
+            assert_eq!(status.xlm_amount, 2_000);
+            assert_eq!(status.nft_id, None);
+        });
+    }
+
+    #[test]
     fn test_distribute_rewards_legacy() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
@@ -982,6 +1157,7 @@ mod test {
                 admin.clone(),
                 1,
                 recipient.clone(),
+                0,
             );
             assert!(result.is_ok());
 
@@ -1015,6 +1191,7 @@ mod test {
                 non_admin.clone(),
                 1,
                 non_admin.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::Unauthorized));
 
@@ -1040,6 +1217,7 @@ mod test {
                 admin.clone(),
                 99,
                 recipient.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::PoolNotFound));
         });
@@ -1077,6 +1255,7 @@ mod test {
                 admin.clone(),
                 1,
                 recipient.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::InvalidAmount));
         });
@@ -1100,8 +1279,37 @@ mod test {
                 admin.clone(),
                 1,
                 recipient.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::NotInitialized));
         });
+    }
+
+    #[test]
+    fn test_admin_withdraw_unclaimed_never_funded() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+            // Create pool with 0 initial balance and never fund it
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+
+            // Admin tries to withdraw from a pool that was never funded
+            let result = RewardManager::admin_withdraw_unclaimed(
+                env.clone(),
+                admin.clone(),
+                1,
+                recipient.clone(),
+            );
+            assert_eq!(result, Err(RewardErrorCode::InvalidAmount));
+        });
+
+        // Recipient received nothing
+        assert_eq!(get_balance(&env, &token_address, &recipient), 0);
     }
 }
