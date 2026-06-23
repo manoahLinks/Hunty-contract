@@ -100,6 +100,7 @@ impl HuntyCore {
             reward_config,
             total_clues: 0, // Empty clue list initially
             required_clues: 0,
+            completed_count: 0,
         };
 
         // Store the hunt
@@ -718,12 +719,19 @@ impl HuntyCore {
             progress.is_completed = true;
             progress.completed_at = current_time;
 
-            // Emit HuntCompleted event
+            // Emit HuntCompleted event with rank
+            // Increment completed count and obtain rank
+            let mut hunt_mut = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+            hunt_mut.completed_count += 1;
+            let rank = hunt_mut.completed_count;
+            // Save updated hunt before publishing event
+            Storage::save_hunt(&env, &hunt_mut);
             let hunt_completed_event = HuntCompletedEvent {
                 hunt_id,
                 player: player.clone(),
                 total_score: progress.total_score,
                 completion_time: current_time,
+                completion_rank: rank,
             };
             env.events().publish(
                 (Symbol::new(&env, "HuntCompleted"), hunt_id),

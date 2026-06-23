@@ -37,6 +37,7 @@ pub struct Hunt {
     pub reward_config: RewardConfig,
     pub total_clues: u32,
     pub required_clues: u32,
+    pub completed_count: u32,
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
@@ -253,6 +254,7 @@ pub struct HuntCompletedEvent {
     pub player: Address,
     pub total_score: u32,
     pub completion_time: u64,
+    pub completion_rank: u32,
 }
 
 #[contracttype]

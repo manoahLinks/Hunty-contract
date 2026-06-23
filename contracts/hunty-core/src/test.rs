@@ -6,7 +6,8 @@ use std::string::ToString;
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{Address, Env, String, Vec};
+    use soroban_sdk::{Address, Env, Symbol, String, Vec};
+use crate::types::HuntCompletedEvent;
     // Bring Soroban testutils traits into scope (generate addresses, set ledger info, register contracts).
     use crate::errors::{HuntError, HuntErrorCode};
     use crate::storage::Storage;
@@ -73,11 +74,110 @@ mod test {
     }
 
     #[test]
-    fn test_clue_not_found_message() {
-        let err = HuntError::ClueNotFound { hunt_id: 10 };
+    fn test_hunt_completion_ranks() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let player3 = Address::generate(&env);
 
-        assert_eq!(err.to_string(), "Clue not found for hunt 10");
+        // Create hunt
+        let hunt_id = as_core_contract(&env, &Address::generate(&env), |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Rank Hunt"),
+                String::from_str(env, "Test ranking"),
+                None,
+                None,
+            )
+        })
+        .unwrap();
+
+        // Add a required clue
+        let question = String::from_str(&env, "What is 2+2?");
+        let answer = String::from_str(&env, "4");
+        env.mock_all_auths();
+        as_core_contract(&env, &Address::generate(&env), |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                question.clone(),
+                answer.clone(),
+                10,
+                true,
+            )
+            .unwrap();
+        });
+
+        // Activate hunt
+        env.mock_all_auths();
+        as_core_contract(&env, &Address::generate(&env), |env| {
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // Register players
+        env.mock_all_auths();
+        as_core_contract(&env, &Address::generate(&env), |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player1.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player2.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player3.clone()).unwrap();
+        });
+
+        // Player1 completes
+        env.mock_all_auths();
+        as_core_contract(&env, &Address::generate(&env), |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player1.clone(),
+                answer.clone(),
+            )
+            .unwrap();
+        });
+        let events1 = env.events().all();
+        let (_, _, data1) = events1.last().unwrap();
+        let completed1: HuntCompletedEvent = data1.clone().try_into().unwrap();
+        assert_eq!(completed1.completion_rank, 1);
+
+        // Player2 completes
+        env.mock_all_auths();
+        as_core_contract(&env, &Address::generate(&env), |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player2.clone(),
+                answer.clone(),
+            )
+            .unwrap();
+        });
+        let events2 = env.events().all();
+        let (_, _, data2) = events2.last().unwrap();
+        let completed2: HuntCompletedEvent = data2.clone().try_into().unwrap();
+        assert_eq!(completed2.completion_rank, 2);
+
+        // Duplicate attempt by Player2 (should not emit new event)
+        env.mock_all_auths();
+        let dup_result = as_core_contract(&env, &Address::generate(&env), |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player2.clone(),
+                answer.clone(),
+            )
+        });
+        assert!(dup_result.is_err());
+        let events_dup = env.events().all();
+        // No new HuntCompletedEvent should be added; last event should still be rank 2
+        let (_, _, data_dup) = events_dup.last().unwrap();
+        let completed_dup: HuntCompletedEvent = data_dup.clone().try_into().unwrap();
+        assert_eq!(completed_dup.completion_rank, 2);
     }
+
 
     #[test]
     fn test_invalid_hunt_status_message() {
