@@ -267,6 +267,206 @@ impl NftReward {
         Storage::get_owner_nfts(&env, &owner)
     }
 
+    /// Searches NFTs by title (case-insensitive partial match).
+    /// Returns a vector of NFT IDs whose titles contain the search query.
+    pub fn search_by_title(env: Env, query: String) -> Vec<u64> {
+        let all_nft_ids = Storage::get_all_nft_ids(&env);
+        let mut results = Vec::new(&env);
+        
+        let query_lower = {
+            let mut lower = String::new(&env);
+            for c in query.chars() {
+                lower.push_char(c.to_ascii_lowercase());
+            }
+            lower
+        };
+
+        for nft_id in all_nft_ids.iter() {
+            if let Some(nft) = Storage::get_nft(&env, nft_id) {
+                let title_lower = {
+                    let mut lower = String::new(&env);
+                    for c in nft.metadata.title.chars() {
+                        lower.push_char(c.to_ascii_lowercase());
+                    }
+                    lower
+                };
+                
+                if title_lower.contains(&query_lower) {
+                    results.push_back(nft_id);
+                }
+            }
+        }
+        
+        results
+    }
+
+    /// Searches NFTs by hunt title (case-insensitive partial match).
+    /// Returns a vector of NFT IDs whose hunt titles contain the search query.
+    pub fn search_by_hunt_title(env: Env, query: String) -> Vec<u64> {
+        let all_nft_ids = Storage::get_all_nft_ids(&env);
+        let mut results = Vec::new(&env);
+        
+        let query_lower = {
+            let mut lower = String::new(&env);
+            for c in query.chars() {
+                lower.push_char(c.to_ascii_lowercase());
+            }
+            lower
+        };
+
+        for nft_id in all_nft_ids.iter() {
+            if let Some(nft) = Storage::get_nft(&env, nft_id) {
+                let hunt_title_lower = {
+                    let mut lower = String::new(&env);
+                    for c in nft.metadata.hunt_title.chars() {
+                        lower.push_char(c.to_ascii_lowercase());
+                    }
+                    lower
+                };
+                
+                if hunt_title_lower.contains(&query_lower) {
+                    results.push_back(nft_id);
+                }
+            }
+        }
+        
+        results
+    }
+
+    /// Filters NFTs by rarity tier.
+    /// Returns a vector of NFT IDs with the specified rarity.
+    /// Rarity tiers: 0 = default, 1 = common, 2 = uncommon, 3 = rare, 4 = epic, 5 = legendary.
+    pub fn search_by_rarity(env: Env, rarity: u32) -> Vec<u64> {
+        let all_nft_ids = Storage::get_all_nft_ids(&env);
+        let mut results = Vec::new(&env);
+
+        for nft_id in all_nft_ids.iter() {
+            if let Some(nft) = Storage::get_nft(&env, nft_id) {
+                if nft.metadata.rarity == rarity {
+                    results.push_back(nft_id);
+                }
+            }
+        }
+        
+        results
+    }
+
+    /// Filters NFTs by custom tier.
+    /// Returns a vector of NFT IDs with the specified tier.
+    /// Tier: 0 = none, other values for custom categories.
+    pub fn search_by_tier(env: Env, tier: u32) -> Vec<u64> {
+        let all_nft_ids = Storage::get_all_nft_ids(&env);
+        let mut results = Vec::new(&env);
+
+        for nft_id in all_nft_ids.iter() {
+            if let Some(nft) = Storage::get_nft(&env, nft_id) {
+                if nft.metadata.tier == tier {
+                    results.push_back(nft_id);
+                }
+            }
+        }
+        
+        results
+    }
+
+    /// General search function with multiple metadata filters.
+    /// All parameters are optional - NFTs must match all provided filters.
+    /// 
+    /// # Arguments
+    /// * `title_query` - Optional partial match for NFT title (case-insensitive)
+    /// * `hunt_title_query` - Optional partial match for hunt title (case-insensitive)
+    /// * `rarity` - Optional rarity filter (exact match)
+    /// * `tier` - Optional tier filter (exact match)
+    /// 
+    /// # Returns
+    /// Vector of NFT IDs matching all provided filters
+    pub fn search_nfts(
+        env: Env,
+        title_query: Option<String>,
+        hunt_title_query: Option<String>,
+        rarity: Option<u32>,
+        tier: Option<u32>,
+    ) -> Vec<u64> {
+        let all_nft_ids = Storage::get_all_nft_ids(&env);
+        let mut results = Vec::new(&env);
+
+        let title_lower_opt = title_query.map(|q| {
+            let mut lower = String::new(&env);
+            for c in q.chars() {
+                lower.push_char(c.to_ascii_lowercase());
+            }
+            lower
+        });
+
+        let hunt_title_lower_opt = hunt_title_query.map(|q| {
+            let mut lower = String::new(&env);
+            for c in q.chars() {
+                lower.push_char(c.to_ascii_lowercase());
+            }
+            lower
+        });
+
+        for nft_id in all_nft_ids.iter() {
+            if let Some(nft) = Storage::get_nft(&env, nft_id) {
+                let mut matches = true;
+
+                // Check title filter
+                if let Some(ref query_lower) = title_lower_opt {
+                    let title_lower = {
+                        let mut lower = String::new(&env);
+                        for c in nft.metadata.title.chars() {
+                            lower.push_char(c.to_ascii_lowercase());
+                        }
+                        lower
+                    };
+                    if !title_lower.contains(query_lower) {
+                        matches = false;
+                    }
+                }
+
+                // Check hunt title filter
+                if matches {
+                    if let Some(ref query_lower) = hunt_title_lower_opt {
+                        let hunt_title_lower = {
+                            let mut lower = String::new(&env);
+                            for c in nft.metadata.hunt_title.chars() {
+                                lower.push_char(c.to_ascii_lowercase());
+                            }
+                            lower
+                        };
+                        if !hunt_title_lower.contains(query_lower) {
+                            matches = false;
+                        }
+                    }
+                }
+
+                // Check rarity filter
+                if matches {
+                    if let Some(r) = rarity {
+                        if nft.metadata.rarity != r {
+                            matches = false;
+                        }
+                    }
+                }
+
+                // Check tier filter
+                if matches {
+                    if let Some(t) = tier {
+                        if nft.metadata.tier != t {
+                            matches = false;
+                        }
+                    }
+                }
+
+                if matches {
+                    results.push_back(nft_id);
+                }
+            }
+        }
+        
+        results
+    }
+
     /// Transfers an NFT from one address to another.
     ///
     /// # Arguments
