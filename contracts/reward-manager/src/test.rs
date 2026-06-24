@@ -1305,6 +1305,7 @@ mod test {
                 admin.clone(),
                 1,
                 recipient.clone(),
+                0,
             );
             assert_eq!(result, Err(RewardErrorCode::InvalidAmount));
         });

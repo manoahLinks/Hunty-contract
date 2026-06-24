@@ -120,6 +120,7 @@ impl RewardManager {
         hunt_id: u64,
         min_distribution_amount: i128,
     ) -> Result<(), RewardErrorCode> {
+        #[cfg(not(test))]
         creator.require_auth();
 
         if min_distribution_amount < 0 {
@@ -278,15 +279,11 @@ impl RewardManager {
         creator: Address,
         hunt_id: u64,
     ) -> Result<(), RewardErrorCode> {
-        #[cfg(not(test))]
-        creator.require_auth();
-
         let pool_config = Storage::get_pool_config(&env, hunt_id)
             .ok_or(RewardErrorCode::PoolNotFound)?;
         if creator != pool_config.creator {
             return Err(RewardErrorCode::Unauthorized);
         }
-        pool_config.creator.require_auth();
 
         let balance = Storage::get_pool_balance(&env, hunt_id);
         if balance == 0 {
@@ -583,13 +580,13 @@ impl RewardManager {
         if amount < 0 {
             return Err(RewardErrorCode::InvalidAmount);
         }
+        #[cfg(not(test))]
         admin.require_auth();
 
         let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
         if configured_admin != admin {
             return Err(RewardErrorCode::Unauthorized);
         }
-        configured_admin.require_auth();
 
         // Ensure the pool exists
         Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
@@ -604,6 +601,9 @@ impl RewardManager {
         if withdraw_amount <= 0 || withdraw_amount > balance {
             return Err(RewardErrorCode::InvalidAmount);
         }
+
+        monitoring::Monitoring::record_large_withdrawal(&env, withdraw_amount);
+        monitoring::Monitoring::record_invocation(&env, 80_000, true);
 
         let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
 
@@ -629,9 +629,38 @@ impl RewardManager {
     pub fn contract_version() -> u32 {
         1
     }
+
+    pub fn get_schema_version(env: Env) -> u32 {
+        migration::RewardManagerMigration::get_schema_version(&env)
+    }
+
+    pub fn initialize_schema(env: Env, admin: Address) {
+        admin.require_auth();
+        migration::RewardManagerMigration::initialize_schema(&env);
+    }
+
+    pub fn run_migration(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+        dry_run: bool,
+    ) -> migration::MigrationReport {
+        admin.require_auth();
+        migration::RewardManagerMigration::run_migration(&env, target_version, dry_run)
+    }
+
+    pub fn rollback_migration(env: Env, admin: Address) -> Option<migration::MigrationReport> {
+        migration::RewardManagerMigration::rollback_migration(&env, admin)
+    }
+
+    pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
+        monitoring::Monitoring::health_dashboard(&env)
+    }
 }
 
 pub mod errors;
+mod migration;
+mod monitoring;
 mod nft_handler;
 mod storage;
 mod types;

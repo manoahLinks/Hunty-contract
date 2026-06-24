@@ -11,6 +11,7 @@ doctest = false
 [dependencies]
 soroban-sdk = { workspace = true }
 reward_manager = { path = "../reward-manager", package = "reward-manager" }
+hunty-migration = { path = "../migration", package = "hunty-migration" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

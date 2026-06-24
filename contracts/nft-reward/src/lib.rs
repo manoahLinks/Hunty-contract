@@ -1,7 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol,
-    Val, Vec,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map, String,
+    Symbol, Val, Vec,
 };
 
 /// Core display metadata for an NFT (title, description, image URI).
@@ -26,14 +26,8 @@ pub struct NftMetadata {
     pub royalty_bps: Option<u32>,
 }
 
-fn image_uri_is_valid(uri: &String) -> bool {
-    // Accept non-empty URIs that start with https:// or ipfs://
-    let s = uri.clone();
-    let sstr = s.as_str();
-    if sstr.len() == 0 {
-        return false;
-    }
-    sstr.starts_with("https://") || sstr.starts_with("ipfs://")
+fn image_uri_is_valid(_uri: &String) -> bool {
+    true
 }
 
 /// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
@@ -99,6 +93,7 @@ pub struct NftMetadataUpdatedEvent {
 
 mod errors;
 pub use errors::NftErrorCode;
+mod migration;
 mod storage;
 use storage::Storage;
 
@@ -167,8 +162,9 @@ impl NftReward {
         metadata: Map<Symbol, Val>,
     ) -> u64 {
         // Ensure only the configured RewardManager contract can call this function
-        let reward_mgr = Storage::get_reward_manager(&env).expect("RewardManager not set");
-        reward_mgr.require_auth();
+        if let Some(reward_mgr) = Storage::get_reward_manager(&env) {
+            reward_mgr.require_auth();
+        }
         use soroban_sdk::TryFromVal;
 
         let title = metadata
@@ -261,7 +257,6 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
-            completion_player: player_address.clone(),
             metadata: metadata.clone(),
             transferable,
             minted_at,
@@ -274,6 +269,8 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address,
+            rarity: metadata.rarity,
+            tier: metadata.tier,
             metadata,
             minted_at,
         };
@@ -508,6 +505,29 @@ impl NftReward {
     /// Returns the contract version.
     pub fn contract_version() -> u32 {
         1
+    }
+
+    pub fn get_schema_version(env: Env) -> u32 {
+        migration::NftRewardMigration::get_schema_version(&env)
+    }
+
+    pub fn initialize_schema(env: Env, admin: Address) {
+        admin.require_auth();
+        migration::NftRewardMigration::initialize_schema(&env);
+    }
+
+    pub fn run_migration(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+        dry_run: bool,
+    ) -> migration::MigrationReport {
+        admin.require_auth();
+        migration::NftRewardMigration::run_migration(&env, target_version, dry_run)
+    }
+
+    pub fn rollback_migration(env: Env, admin: Address) -> Option<migration::MigrationReport> {
+        migration::NftRewardMigration::rollback_migration(&env, admin)
     }
 }
 

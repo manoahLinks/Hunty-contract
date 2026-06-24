@@ -11,6 +11,7 @@ doctest = false
 [dependencies]
 soroban-sdk = { workspace = true }
 nft-reward = { path = "../nft-reward" }
+hunty-migration = { path = "../migration", package = "hunty-migration" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
