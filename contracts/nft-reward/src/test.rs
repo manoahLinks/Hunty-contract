@@ -89,6 +89,7 @@ fn test_initialize_stores_admin() {
 }
 
 #[test]
+#[should_panic(expected = "HostError")]
 fn test_initialize_requires_auth() {
     let env = Env::default();
     env.ledger().set_timestamp(1000);
