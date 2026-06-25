@@ -17,6 +17,11 @@ impl Storage {
     const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
     const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CCNT");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
+    const BAN_KEY: soroban_sdk::Symbol = symbol_short!("BAN");
+    const SUBMISSION_KEY: soroban_sdk::Symbol = symbol_short!("SUBMIT");
+    const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
+    const VIEW_ONLY_KEY: soroban_sdk::Symbol = symbol_short!("VIEW");
+    const GLOBAL_VIEW_ONLY_KEY: soroban_sdk::Symbol = symbol_short!("GVW");
 
     // ========== Hunt Storage Functions ==========
 
@@ -242,6 +247,29 @@ impl Storage {
         (Self::PLAYERS_LIST_KEY, hunt_id)
     }
 
+    /// Key for view-only addresses for a hunt.
+    fn view_only_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::VIEW_ONLY_KEY, hunt_id)
+    }
+
+    /// Generates a storage key for a processed answer submission envelope.
+    fn processed_submission_key(
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+    ) -> (soroban_sdk::Symbol, u64, u32, Address, u64, u64) {
+        (
+            Self::SUBMISSION_KEY,
+            hunt_id,
+            clue_id,
+            player.clone(),
+            submission_nonce,
+            submitted_at,
+        )
+    }
+
     // ========== Internal Helper Functions ==========
 
     /// Adds a clue ID to the list of clues for a hunt.
@@ -390,68 +418,260 @@ impl Storage {
         env.storage().persistent().get(&Self::REWARD_MGR_KEY)
     }
 
+    pub fn save_processed_submission(
+        env: &Env,
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+        expires_at: u64,
+    ) {
+        let key = Self::processed_submission_key(
+            hunt_id,
+            clue_id,
+            player,
+            submission_nonce,
+            submitted_at,
+        );
+        env.storage().persistent().set(&key, &expires_at);
+    }
+
+    pub fn get_processed_submission_expiry(
+        env: &Env,
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+    ) -> Option<u64> {
+        let key = Self::processed_submission_key(
+            hunt_id,
+            clue_id,
+            player,
+            submission_nonce,
+            submitted_at,
+        );
+        env.storage().persistent().get(&key)
+    }
+
+    pub fn remove_processed_submission(
+        env: &Env,
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+    ) {
+        let key = Self::processed_submission_key(
+            hunt_id,
+            clue_id,
+            player,
+            submission_nonce,
+            submitted_at,
+        );
+        env.storage().persistent().remove(&key);
+    }
+
     // --- Contract version ---
 
+    #[allow(dead_code)]
     pub fn set_contract_version(env: &Env, version: u32) {
         env.storage().instance().set(&symbol_short!("CVER"), &version);
     }
 
+    #[allow(dead_code)]
     pub fn get_contract_version(env: &Env) -> Option<u32> {
         env.storage().instance().get(&symbol_short!("CVER"))
     }
 
-    // ========== Hunt creation rate limiting ==========
+    // ========== View-Only Access Functions ==========
 
-    pub fn get_rate_limit_admin(env: &Env) -> Option<Address> {
-        env.storage().instance().get(&symbol_short!("HRLADM"))
+    /// Adds an address to the view-only list for a specific hunt.
+    /// View-only addresses can read hunt data but cannot modify it.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to grant view-only access for
+    /// * `address` - The address to grant view-only access
+    pub fn add_view_only(env: &Env, hunt_id: u64, address: &Address) {
+        let key = Self::view_only_key(hunt_id);
+        let mut view_only_list = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        // Check if address already exists to avoid duplicates
+        if view_only_list.first_index_of(address).is_none() {
+            view_only_list.push_back(address.clone());
+            env.storage().instance().set(&key, &view_only_list);
+        }
     }
 
-    pub fn set_rate_limit_admin(env: &Env, admin: &Address) {
-        env.storage().instance().set(&symbol_short!("HRLADM"), admin);
+    /// Removes an address from the view-only list for a specific hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to revoke view-only access for
+    /// * `address` - The address to revoke view-only access
+    pub fn remove_view_only(env: &Env, hunt_id: u64, address: &Address) {
+        let key = Self::view_only_key(hunt_id);
+        let mut view_only_list = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        if let Some(idx) = view_only_list.first_index_of(address) {
+            view_only_list.remove(idx);
+            env.storage().instance().set(&key, &view_only_list);
+        }
     }
 
-    pub fn get_default_hunt_creation_limit(env: &Env) -> u32 {
+    /// Checks if an address has view-only access for a specific hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to check view-only access for
+    /// * `address` - The address to check
+    ///
+    /// # Returns
+    /// `true` if the address has view-only access, `false` otherwise
+    pub fn is_view_only(env: &Env, hunt_id: u64, address: &Address) -> bool {
+        let key = Self::view_only_key(hunt_id);
+        let view_only_list = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        view_only_list.first_index_of(address).is_some()
+    }
+
+    /// Gets all view-only addresses for a specific hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to get view-only addresses for
+    ///
+    /// # Returns
+    /// A vector of all addresses with view-only access for the hunt
+    pub fn get_view_only_list(env: &Env, hunt_id: u64) -> Vec<Address> {
+        let key = Self::view_only_key(hunt_id);
         env.storage()
             .instance()
-            .get(&symbol_short!("HRLDEF"))
-            .unwrap_or(crate::rate_limit::DEFAULT_HUNT_CREATION_LIMIT)
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env))
     }
 
-    pub fn set_default_hunt_creation_limit(env: &Env, limit: u32) {
-        env.storage().instance().set(&symbol_short!("HRLDEF"), &limit);
+    // ========== Global Admin Functions ==========
+
+    /// Sets the contract admin address.
+    /// The admin can manage global view-only access.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `admin` - The admin address
+    pub fn set_admin(env: &Env, admin: &Address) {
+        env.storage().instance().set(&Self::ADMIN_KEY, admin);
     }
 
-    pub fn get_creator_limit_override(env: &Env, creator: &Address) -> Option<u32> {
-        let key = (symbol_short!("HRLOVR"), creator.clone());
-        env.storage().persistent().get(&key)
+    /// Gets the contract admin address.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    /// The admin address if set, None otherwise
+    pub fn get_admin(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&Self::ADMIN_KEY)
     }
 
-    pub fn set_creator_limit_override(env: &Env, creator: &Address, limit: u32) {
-        let key = (symbol_short!("HRLOVR"), creator.clone());
-        env.storage().persistent().set(&key, &limit);
+    /// Adds an address to the global view-only list.
+    /// Global view-only addresses can read ALL hunt data.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `address` - The address to grant global view-only access
+    pub fn add_global_view_only(env: &Env, address: &Address) {
+        let mut view_only_list = env
+            .storage()
+            .instance()
+            .get(&Self::GLOBAL_VIEW_ONLY_KEY)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        // Check if address already exists to avoid duplicates
+        if view_only_list.first_index_of(address).is_none() {
+            view_only_list.push_back(address.clone());
+            env.storage().instance().set(&Self::GLOBAL_VIEW_ONLY_KEY, &view_only_list);
+        }
     }
 
-    pub fn get_effective_hunt_creation_limit(env: &Env, creator: &Address) -> u32 {
-        Self::get_creator_limit_override(env, creator)
-            .unwrap_or_else(|| Self::get_default_hunt_creation_limit(env))
+    /// Removes an address from the global view-only list.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `address` - The address to revoke global view-only access
+    pub fn remove_global_view_only(env: &Env, address: &Address) {
+        let mut view_only_list = env
+            .storage()
+            .instance()
+            .get(&Self::GLOBAL_VIEW_ONLY_KEY)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        if let Some(idx) = view_only_list.first_index_of(address) {
+            view_only_list.remove(idx);
+            env.storage().instance().set(&Self::GLOBAL_VIEW_ONLY_KEY, &view_only_list);
+        }
     }
 
-    fn creator_daily_count_key(creator: &Address, day: u64) -> (soroban_sdk::Symbol, Address, u64) {
-        (symbol_short!("HRLCT"), creator.clone(), day)
+    /// Checks if an address has global view-only access.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `address` - The address to check
+    ///
+    /// # Returns
+    /// `true` if the address has global view-only access, `false` otherwise
+    pub fn is_global_view_only(env: &Env, address: &Address) -> bool {
+        let view_only_list = env
+            .storage()
+            .instance()
+            .get(&Self::GLOBAL_VIEW_ONLY_KEY)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        view_only_list.first_index_of(address).is_some()
     }
 
-    pub fn get_creator_daily_hunt_count(env: &Env, creator: &Address, day: u64) -> u32 {
-        let key = Self::creator_daily_count_key(creator, day);
-        env.storage().persistent().get(&key).unwrap_or(0)
+    /// Gets all global view-only addresses.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    /// A vector of all addresses with global view-only access
+    pub fn get_global_view_only_list(env: &Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&Self::GLOBAL_VIEW_ONLY_KEY)
+            .unwrap_or_else(|| Vec::new(env))
+
+    // ========== Ban Storage Functions ==========
+
+    fn ban_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::BAN_KEY, hunt_id, player.clone())
     }
 
-    pub fn set_creator_daily_hunt_count(
-        env: &Env,
-        creator: &Address,
-        day: u64,
-        count: u32,
-    ) {
-        let key = Self::creator_daily_count_key(creator, day);
-        env.storage().persistent().set(&key, &count);
+    pub fn ban_player(env: &Env, hunt_id: u64, player: &Address) {
+        env.storage().persistent().set(&Self::ban_key(hunt_id, player), &());
+    }
+
+    pub fn unban_player(env: &Env, hunt_id: u64, player: &Address) {
+        env.storage().persistent().remove(&Self::ban_key(hunt_id, player));
+    }
+
+    pub fn is_banned(env: &Env, hunt_id: u64, player: &Address) -> bool {
+        env.storage().persistent().has(&Self::ban_key(hunt_id, player))
     }
 }
