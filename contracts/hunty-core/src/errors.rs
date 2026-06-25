@@ -26,6 +26,8 @@ pub enum HuntErrorCode {
     RewardAlreadyClaimed = 19,
     RewardDistributionFailed = 20,
     NoRewardsConfigured = 21,
+    DuplicateSubmission = 22,
+    SubmissionExpired = 23,
 }
 
 #[derive(Debug)]
@@ -49,6 +51,8 @@ pub enum HuntError {
     RewardAlreadyClaimed { hunt_id: u64 },
     RewardDistributionFailed { hunt_id: u64 },
     NoRewardsConfigured { hunt_id: u64 },
+    DuplicateSubmission { hunt_id: u64, clue_id: u32 },
+    SubmissionExpired { submitted_at: u64, current_time: u64 },
 }
 
 impl fmt::Display for HuntError {
@@ -118,6 +122,23 @@ impl fmt::Display for HuntError {
             HuntError::NoRewardsConfigured { hunt_id } => {
                 write!(f, "No rewards configured for hunt {}", hunt_id)
             }
+            HuntError::DuplicateSubmission { hunt_id, clue_id } => {
+                write!(
+                    f,
+                    "Duplicate submission detected for hunt {} clue {}",
+                    hunt_id, clue_id
+                )
+            }
+            HuntError::SubmissionExpired {
+                submitted_at,
+                current_time,
+            } => {
+                write!(
+                    f,
+                    "Submission expired or invalid: submitted_at {}, current_time {}",
+                    submitted_at, current_time
+                )
+            }
         }
     }
 }
@@ -144,6 +165,8 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::RewardAlreadyClaimed { .. } => HuntErrorCode::RewardAlreadyClaimed,
             HuntError::RewardDistributionFailed { .. } => HuntErrorCode::RewardDistributionFailed,
             HuntError::NoRewardsConfigured { .. } => HuntErrorCode::NoRewardsConfigured,
+            HuntError::DuplicateSubmission { .. } => HuntErrorCode::DuplicateSubmission,
+            HuntError::SubmissionExpired { .. } => HuntErrorCode::SubmissionExpired,
         }
     }
 }

@@ -13,11 +13,16 @@ impl Storage {
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
     const MINTER_KEY: soroban_sdk::Symbol = symbol_short!("MNTR");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
+    const NFT_VERSION_KEY: soroban_sdk::Symbol = symbol_short!("NVER");
     const TOTAL_HUNTS_KEY: soroban_sdk::Symbol = symbol_short!("THUNTS");
     const TOTAL_OWNERS_KEY: soroban_sdk::Symbol = symbol_short!("TOWNRS");
 
     fn nft_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::NFT_KEY, nft_id)
+    }
+
+    fn nft_version_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::NFT_VERSION_KEY, nft_id)
     }
 
     fn owner_nft_entry_key(owner: &Address, index: u32) -> (soroban_sdk::Symbol, Address, u32) {
@@ -36,8 +41,11 @@ impl Storage {
         (Self::MINTER_KEY, minter.clone())
     }
 
-    fn operator_key(owner: &Address, operator: &Address) -> (soroban_sdk::Symbol, Address, Address) {
-        (symbol_short!("OPRT"), owner.clone(), operator.clone())
+    fn operator_key(
+        owner: &Address,
+        operator: &Address,
+    ) -> (soroban_sdk::Symbol, Address, Address) {
+        (symbol_short!("OPER"), owner.clone(), operator.clone())
     }
 
     pub fn remove_nft(env: &Env, nft_id: u64) {
@@ -92,6 +100,26 @@ impl Storage {
     pub fn get_nft(env: &Env, nft_id: u64) -> Option<NftData> {
         let key = Self::nft_key(nft_id);
         env.storage().persistent().get(&key)
+    }
+
+    pub fn set_nft_version(env: &Env, nft_id: u64, version: u32) {
+        let key = Self::nft_version_key(nft_id);
+        env.storage().persistent().set(&key, &version);
+    }
+
+    /// Reads the metadata schema version for an NFT.
+    /// Legacy NFTs (written before versioning existed) have no version key
+    /// and are treated as version 1.
+    pub fn get_nft_version(env: &Env, nft_id: u64) -> u32 {
+        let key = Self::nft_version_key(nft_id);
+        env.storage().persistent().get(&key).unwrap_or(1)
+    }
+
+    /// Returns true if an explicit version key exists for the given NFT.
+    /// Used by migration to detect NFTs that still need a version assigned.
+    pub fn has_nft_version_key(env: &Env, nft_id: u64) -> bool {
+        let key = Self::nft_version_key(nft_id);
+        env.storage().persistent().has(&key)
     }
 
     pub fn next_nft_id(env: &Env) -> u64 {
@@ -166,8 +194,8 @@ impl Storage {
     pub fn get_max_supply(env: &Env) -> Option<u64> {
         env.storage()
             .persistent()
-            .get(&Self::MAX_SUPPLY_KEY)
-            .unwrap_or(None)
+            .get::<_, Option<u64>>(&Self::MAX_SUPPLY_KEY)
+            .flatten()
     }
 
     pub fn is_initialized(env: &Env) -> bool {

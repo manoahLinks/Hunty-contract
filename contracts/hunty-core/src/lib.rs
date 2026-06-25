@@ -20,6 +20,10 @@ const MAX_LEADERBOARD_SIZE: u32 = 20;
 /// Maximum number of player records scanned when building leaderboard responses.
 /// This prevents unbounded gas growth for large hunts.
 const MAX_LEADERBOARD_SCAN_SIZE: u32 = 200;
+/// Maximum allowed age for a submission envelope before it is considered stale.
+const ANSWER_SUBMISSION_WINDOW_SECS: u64 = 300;
+/// Small forward-skew allowance so near-simultaneous signing and inclusion does not fail.
+const ANSWER_SUBMISSION_FUTURE_SKEW_SECS: u64 = 30;
 
 #[contract]
 pub struct HuntyCore;
@@ -584,6 +588,8 @@ impl HuntyCore {
     /// * `clue_id` - The clue ID to answer
     /// * `player` - The address of the player submitting the answer
     /// * `answer` - The plain-text answer submission
+    /// * `submission_nonce` - Caller-chosen unique nonce for this submission envelope
+    /// * `submitted_at` - Client timestamp captured when the submission was signed
     ///
     /// # Returns
     /// `Ok(())` on successful answer verification and progress update
@@ -595,6 +601,8 @@ impl HuntyCore {
     /// * `ClueNotFound` - Clue does not exist in this hunt
     /// * `ClueAlreadyCompleted` - Player has already completed this clue
     /// * `InvalidAnswer` - Submitted answer does not match the stored hash
+    /// * `DuplicateSubmission` - Submission nonce/timestamp envelope was already processed
+    /// * `SubmissionExpired` - Submission timestamp is too old or too far in the future
     ///
     /// # Events
     /// * `ClueCompleted` - Emitted when answer is correct
@@ -606,6 +614,8 @@ impl HuntyCore {
         clue_id: u32,
         player: Address,
         answer: String,
+        submission_nonce: u64,
+        submitted_at: u64,
     ) -> Result<(), HuntErrorCode> {
         // Require player authorization
         player.require_auth();
@@ -617,6 +627,29 @@ impl HuntyCore {
         if !hunt.is_active(current_time) {
             return Err(HuntErrorCode::HuntNotActive);
         }
+
+        Self::validate_submission_timestamp(current_time, submitted_at)
+            .map_err(HuntErrorCode::from)?;
+        Self::assert_submission_not_replayed(
+            &env,
+            hunt_id,
+            clue_id,
+            &player,
+            submission_nonce,
+            submitted_at,
+            current_time,
+        )
+        .map_err(HuntErrorCode::from)?;
+
+        Storage::save_processed_submission(
+            &env,
+            hunt_id,
+            clue_id,
+            &player,
+            submission_nonce,
+            submitted_at,
+            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
+        );
 
         let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
             .ok_or(HuntErrorCode::PlayerNotRegistered)?;
@@ -655,13 +688,8 @@ impl HuntyCore {
             progress.is_completed = true;
             progress.completed_at = current_time;
 
-            // Emit HuntCompleted event with rank
-            // Increment completed count and obtain rank
-            let mut hunt_mut = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
-            hunt_mut.completed_count += 1;
-            let rank = hunt_mut.completed_count;
-            // Save updated hunt before publishing event
-            Storage::save_hunt(&env, &hunt_mut);
+            // Rank is the number of already-completed players plus this player.
+            let rank = Self::completion_rank(&env, hunt_id);
             let hunt_completed_event = HuntCompletedEvent {
                 hunt_id,
                 player: player.clone(),
@@ -687,6 +715,71 @@ impl HuntyCore {
             (Symbol::new(&env, "ClueCompleted"), hunt_id, clue_id),
             clue_completed_event,
         );
+
+        Ok(())
+    }
+
+    fn completion_rank(env: &Env, hunt_id: u64) -> u32 {
+        let players = Storage::get_hunt_players(env, hunt_id);
+        let mut completed_players = 0u32;
+        for i in 0..players.len() {
+            let progress = players.get(i).unwrap();
+            if progress.is_completed {
+                completed_players += 1;
+            }
+        }
+        completed_players.saturating_add(1)
+    }
+
+    fn validate_submission_timestamp(
+        current_time: u64,
+        submitted_at: u64,
+    ) -> Result<(), HuntError> {
+        if submitted_at > current_time.saturating_add(ANSWER_SUBMISSION_FUTURE_SKEW_SECS) {
+            return Err(HuntError::SubmissionExpired {
+                submitted_at,
+                current_time,
+            });
+        }
+        if current_time.saturating_sub(submitted_at) > ANSWER_SUBMISSION_WINDOW_SECS {
+            return Err(HuntError::SubmissionExpired {
+                submitted_at,
+                current_time,
+            });
+        }
+        Ok(())
+    }
+
+    fn assert_submission_not_replayed(
+        env: &Env,
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+        current_time: u64,
+    ) -> Result<(), HuntError> {
+        if let Some(expires_at) = Storage::get_processed_submission_expiry(
+            env,
+            hunt_id,
+            clue_id,
+            player,
+            submission_nonce,
+            submitted_at,
+        ) {
+            if current_time <= expires_at {
+                return Err(HuntError::DuplicateSubmission { hunt_id, clue_id });
+            }
+
+            Storage::remove_processed_submission(
+                env,
+                hunt_id,
+                clue_id,
+                player,
+                submission_nonce,
+                submitted_at,
+            );
+        }
 
         Ok(())
     }
