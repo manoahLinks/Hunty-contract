@@ -61,6 +61,7 @@ impl HuntyCore {
         _start_time: Option<u64>,
         end_time: Option<u64>,
         max_submissions_per_minute: u32,
+        start_multiplier_bps: Option<u32>,
     ) -> Result<u64, HuntErrorCode> {
         monitoring::Monitoring::record_invocation(&env, 50_000, true);
         // Validate creator address - in Soroban, Address is always valid if constructed,
@@ -115,6 +116,7 @@ impl HuntyCore {
             required_clues: 0,
             completed_count: 0,
             max_submissions_per_minute,
+            start_multiplier_bps: start_multiplier_bps.unwrap_or(20000),
         };
 
         // Store the hunt
@@ -160,6 +162,7 @@ impl HuntyCore {
         answer: String,
         points: u32,
         is_required: bool,
+        difficulty: Option<u32>,
     ) -> Result<u32, HuntErrorCode> {
         let hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
         if hunt.status != HuntStatus::Draft {
@@ -188,6 +191,7 @@ impl HuntyCore {
             answer_hash,
             points,
             is_required,
+            difficulty: difficulty.unwrap_or(1),
         };
         Storage::save_clue(&env, hunt_id, &clue);
         let mut updated = hunt;
@@ -215,6 +219,7 @@ impl HuntyCore {
             question: clue.question,
             points: clue.points,
             is_required: clue.is_required,
+            difficulty: clue.difficulty,
         })
     }
 
@@ -232,6 +237,7 @@ impl HuntyCore {
                 question: c.question,
                 points: c.points,
                 is_required: c.is_required,
+                difficulty: c.difficulty,
             });
         }
         out
@@ -261,6 +267,7 @@ impl HuntyCore {
                     question: c.question,
                     points: c.points,
                     is_required: c.is_required,
+                    difficulty: c.difficulty,
                 });
             }
         }
@@ -270,7 +277,7 @@ impl HuntyCore {
     /// Normalizes answer (trim, lowercase) and returns SHA256 hash as BytesN<32>.
     /// Uses hunt_id and clue_id as salt to prevent rainbow table precomputation.
     /// Hashing scheme: SHA256(hunt_id || clue_id || normalized_answer)
-    fn normalize_and_hash_answer(
+    pub(crate) fn normalize_and_hash_answer(
         env: &Env,
         hunt_id: u64,
         clue_id: u32,
@@ -484,12 +491,16 @@ impl HuntyCore {
     /// * `InsufficientRewardPool` - All reward slots taken
     /// * `RewardDistributionFailed` - Cross-contract call failed
     pub fn complete_hunt(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
-        player.require_auth();
+    player.require_auth();
+    
+    if Storage::is_pause_rewards(&env) {
+        return Err(HuntErrorCode::RewardsPaused);
+    }
 
-        let mut hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
+    let mut hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
 
-        let mut progress = Storage::get_player_progress_or_error(&env, hunt_id, &player)
-            .map_err(HuntErrorCode::from)?;
+    let mut progress = Storage::get_player_progress_or_error(&env, hunt_id, &player)
+        .map_err(HuntErrorCode::from)?;
 
         // Verify the player has completed all required clues
         if !progress.is_completed {
@@ -619,35 +630,39 @@ impl HuntyCore {
     /// * `HuntNotActive` - Hunt has ended (past end_time)
     /// * `DuplicateRegistration` - Player is already registered for this hunt
     pub fn register_player(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
-        player.require_auth();
+    player.require_auth();
 
-        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
-
-        if hunt.status != HuntStatus::Active {
-            return Err(HuntErrorCode::InvalidHuntStatus);
-        }
-
-        let current_time = env.ledger().timestamp();
-        if !hunt.is_active(current_time) {
-            return Err(HuntErrorCode::HuntNotActive);
-        }
-
-        if Storage::get_player_progress(&env, hunt_id, &player).is_some() {
-            return Err(HuntErrorCode::DuplicateRegistration);
-        }
-
-        let progress = PlayerProgress::new(&env, player.clone(), hunt_id, current_time);
-        Storage::save_player_progress(&env, &progress);
-
-        let event = PlayerRegisteredEvent {
-            hunt_id,
-            player: player.clone(),
-        };
-        env.events()
-            .publish((Symbol::new(&env, "PlayerRegistered"), hunt_id), event);
-
-        Ok(())
+    if Storage::is_pause_registrations(&env) {
+        return Err(HuntErrorCode::RegistrationsPaused);
     }
+
+    let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+    if hunt.status != HuntStatus::Active {
+        return Err(HuntErrorCode::InvalidHuntStatus);
+    }
+
+    let current_time = env.ledger().timestamp();
+    if !hunt.is_active(current_time) {
+        return Err(HuntErrorCode::HuntNotActive);
+    }
+
+    if Storage::get_player_progress(&env, hunt_id, &player).is_some() {
+        return Err(HuntErrorCode::DuplicateRegistration);
+    }
+
+    let progress = PlayerProgress::new(&env, player.clone(), hunt_id, current_time);
+    Storage::save_player_progress(&env, &progress);
+
+    let event = PlayerRegisteredEvent {
+        hunt_id,
+        player: player.clone(),
+    };
+    env.events()
+        .publish((Symbol::new(&env, "PlayerRegistered"), hunt_id), event);
+
+    Ok(())
+}
 
     /// This function verifies the submitted answer by hashing it and comparing
     /// with the stored answer hash. If correct, updates player progress and emits
@@ -679,6 +694,23 @@ impl HuntyCore {
     /// * `ClueCompleted` - Emitted when answer is correct
     /// * `HuntCompleted` - Emitted when all required clues are completed
     /// * `AnswerIncorrect` - Emitted when answer is wrong (for analytics)
+    pub(crate) fn calculate_score(
+        hunt: &Hunt,
+        clue: &Clue,
+        started_at: u64,
+        completed_at: u64,
+    ) -> u32 {
+        let elapsed = completed_at.saturating_sub(started_at);
+        let decrease_steps = elapsed / 50; // Decrease every 50 seconds
+        let decrease_bps = decrease_steps * 5000; // 5000 bps = 0.5x per step
+        let multiplier_bps = core::cmp::max(
+            10000, // Minimum 1x
+            hunt.start_multiplier_bps.saturating_sub(decrease_bps as u32),
+        );
+        let base_points = clue.points.saturating_mul(clue.difficulty);
+        (base_points as u64 * multiplier_bps as u64 / 10000) as u32
+    }
+
     pub fn submit_answer(
         env: Env,
         hunt_id: u64,
@@ -690,6 +722,10 @@ impl HuntyCore {
     ) -> Result<(), HuntErrorCode> {
         // Require player authorization
         player.require_auth();
+        
+        if Storage::is_pause_answers(&env) {
+            return Err(HuntErrorCode::AnswersPaused);
+        }
 
         // 1. Verify hunt exists and is active
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
@@ -777,7 +813,8 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidAnswer);
         }
 
-        progress.complete_clue(&env, clue_id, clue.points)?;
+        let score = Self::calculate_score(&hunt, &clue, progress.started_at, current_time);
+        progress.complete_clue(&env, clue_id, score)?;
 
         if hunt.max_submissions_per_minute > 0 {
             progress.recent_submissions = Vec::new(&env);
@@ -816,7 +853,7 @@ impl HuntyCore {
             hunt_id,
             player: player.clone(),
             clue_id,
-            points_earned: clue.points,
+            points_earned: score,
         };
         env.events().publish(
             (Symbol::new(&env, "ClueCompleted"), hunt_id, clue_id),
@@ -1187,6 +1224,88 @@ pub fn get_global_view_only_list(env: Env) -> Vec<Address> {
     Storage::get_global_view_only_list(&env)
 }
 
+// Pause controls
+pub fn pause_registrations(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+    admin.require_auth();
+    
+    let configured_admin = Storage::get_admin(&env).ok_or(HuntErrorCode::Unauthorized)?;
+    if configured_admin != admin {
+        return Err(HuntErrorCode::Unauthorized);
+    }
+    
+    Storage::set_pause_registrations(&env, true);
+    Ok(())
+}
+
+pub fn unpause_registrations(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+    admin.require_auth();
+    
+    let configured_admin = Storage::get_admin(&env).ok_or(HuntErrorCode::Unauthorized)?;
+    if configured_admin != admin {
+        return Err(HuntErrorCode::Unauthorized);
+    }
+    
+    Storage::set_pause_registrations(&env, false);
+    Ok(())
+}
+
+pub fn pause_answers(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+    admin.require_auth();
+    
+    let configured_admin = Storage::get_admin(&env).ok_or(HuntErrorCode::Unauthorized)?;
+    if configured_admin != admin {
+        return Err(HuntErrorCode::Unauthorized);
+    }
+    
+    Storage::set_pause_answers(&env, true);
+    Ok(())
+}
+
+pub fn unpause_answers(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+    admin.require_auth();
+    
+    let configured_admin = Storage::get_admin(&env).ok_or(HuntErrorCode::Unauthorized)?;
+    if configured_admin != admin {
+        return Err(HuntErrorCode::Unauthorized);
+    }
+    
+    Storage::set_pause_answers(&env, false);
+    Ok(())
+}
+
+pub fn pause_rewards(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+    admin.require_auth();
+    
+    let configured_admin = Storage::get_admin(&env).ok_or(HuntErrorCode::Unauthorized)?;
+    if configured_admin != admin {
+        return Err(HuntErrorCode::Unauthorized);
+    }
+    
+    Storage::set_pause_rewards(&env, true);
+    Ok(())
+}
+
+pub fn unpause_rewards(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+    admin.require_auth();
+    
+    let configured_admin = Storage::get_admin(&env).ok_or(HuntErrorCode::Unauthorized)?;
+    if configured_admin != admin {
+        return Err(HuntErrorCode::Unauthorized);
+    }
+    
+    Storage::set_pause_rewards(&env, false);
+    Ok(())
+}
+
+// Query pause state
+pub fn get_pause_state(env: Env) -> (bool, bool, bool) {
+    (
+        Storage::is_pause_registrations(&env),
+        Storage::is_pause_answers(&env),
+        Storage::is_pause_rewards(&env)
+    )
+}
+
 // -----------------------------------------------------------------------------
 // Schema Migration & Monitoring
 // -----------------------------------------------------------------------------
@@ -1227,6 +1346,7 @@ pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
     }
 }
 
+mod admin;
 mod errors;
 mod migration;
 mod monitoring;

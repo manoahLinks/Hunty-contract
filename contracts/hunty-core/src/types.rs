@@ -35,6 +35,7 @@ pub struct Hunt {
     pub required_clues: u32,
     pub completed_count: u32,
     pub max_submissions_per_minute: u32,
+    pub start_multiplier_bps: u32,
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
@@ -46,6 +47,7 @@ pub struct Clue {
     pub answer_hash: BytesN<32>,
     pub points: u32,
     pub is_required: bool,
+    pub difficulty: u32,
 }
 
 /// Clue info returned by get_clue/list_clues. Excludes answer hash.
@@ -56,6 +58,7 @@ pub struct ClueInfo {
     pub question: String,
     pub points: u32,
     pub is_required: bool,
+    pub difficulty: u32,
 }
 
 #[contracttype]

@@ -61,6 +61,31 @@ impl Storage {
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
     const VIEW_ONLY_KEY: soroban_sdk::Symbol = symbol_short!("VIEW");
     const GLOBAL_VIEW_ONLY_KEY: soroban_sdk::Symbol = symbol_short!("GVW");
+    const PAUSE_REGISTRATIONS_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_REG");
+    const PAUSE_ANSWERS_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_ANS");
+    const PAUSE_REWARDS_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_RWD");
+    
+    // Pause functions
+    pub fn set_pause_registrations(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_REGISTRATIONS_KEY, &paused);
+    }
+    pub fn is_pause_registrations(env: &Env) -> bool {
+        env.storage().instance().get(&Self::PAUSE_REGISTRATIONS_KEY).unwrap_or(false)
+    }
+    
+    pub fn set_pause_answers(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_ANSWERS_KEY, &paused);
+    }
+    pub fn is_pause_answers(env: &Env) -> bool {
+        env.storage().instance().get(&Self::PAUSE_ANSWERS_KEY).unwrap_or(false)
+    }
+    
+    pub fn set_pause_rewards(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_REWARDS_KEY, &paused);
+    }
+    pub fn is_pause_rewards(env: &Env) -> bool {
+        env.storage().instance().get(&Self::PAUSE_REWARDS_KEY).unwrap_or(false)
+    }
 
     // ========== Hunt Storage Functions ==========
 
@@ -666,6 +691,15 @@ impl Storage {
 
     // ========== Global Admin Functions ==========
 
+    /// Checks if an address is the contract admin
+    pub fn is_admin(env: &Env, address: &Address) -> bool {
+        if let Some(admin) = Self::get_admin(env) {
+            admin == *address
+        } else {
+            false
+        }
+    }
+    
     /// Sets the contract admin address.
     /// The admin can manage global view-only access.
     ///
@@ -685,6 +719,45 @@ impl Storage {
     /// The admin address if set, None otherwise
     pub fn get_admin(env: &Env) -> Option<Address> {
         env.storage().instance().get(&Self::ADMIN_KEY)
+    }
+    
+    // Backward compatibility: general pause
+    const PAUSE_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE");
+    pub fn set_paused(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_KEY, &paused);
+    }
+    pub fn is_paused(env: &Env) -> bool {
+        env.storage().instance().get(&Self::PAUSE_KEY).unwrap_or(false)
+    }
+    
+    // Blacklist functions for backward compatibility
+    const BLACKLIST_KEY: soroban_sdk::Symbol = symbol_short!("BLACKLIST");
+    pub fn set_blacklisted(env: &Env, address: &Address, blacklisted: bool) {
+        if blacklisted {
+            let mut list = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+            if list.first_index_of(address).is_none() {
+                list.push_back(address.clone());
+                env.storage().instance().set(&Self::BLACKLIST_KEY, &list);
+            }
+        } else {
+            let mut list = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+            if let Some(idx) = list.first_index_of(address) {
+                list.remove(idx);
+                env.storage().instance().set(&Self::BLACKLIST_KEY, &list);
+            }
+        }
+    }
+    pub fn is_blacklisted(env: &Env, address: &Address) -> bool {
+        let list: Vec<Address> = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+        list.first_index_of(address).is_some()
+    }
+    
+    // Helper functions for emergency stop (placeholder for now)
+    pub fn get_active_hunt_ids(_env: &Env) -> Vec<u64> {
+        Vec::new(_env)
+    }
+    pub fn set_hunt_status(_env: &Env, _hunt_id: u64, _status: crate::types::HuntStatus) {
+        // Placeholder
     }
 
     /// Adds an address to the global view-only list.

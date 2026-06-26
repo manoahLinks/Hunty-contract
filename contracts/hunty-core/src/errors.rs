@@ -32,6 +32,9 @@ pub enum HuntErrorCode {
     NoRequiredClues = 25,
     RateLimitExceeded = 26,
     ScoreOverflow = 27,
+    RegistrationsPaused = 28,
+    AnswersPaused = 29,
+    RewardsPaused = 30,
 }
 
 #[derive(Debug)]
@@ -61,6 +64,9 @@ pub enum HuntError {
     NoRequiredClues { hunt_id: u64 },
     RateLimitExceeded { cooldown_remaining: u64 },
     ScoreOverflow,
+    RegistrationsPaused,
+    AnswersPaused,
+    RewardsPaused,
 }
 
 impl fmt::Display for HuntError {
@@ -159,6 +165,15 @@ impl fmt::Display for HuntError {
             HuntError::ScoreOverflow => {
                 write!(f, "Score calculation overflow")
             }
+            HuntError::RegistrationsPaused => {
+                write!(f, "Registrations are currently paused")
+            }
+            HuntError::AnswersPaused => {
+                write!(f, "Answer submissions are currently paused")
+            }
+            HuntError::RewardsPaused => {
+                write!(f, "Reward claims are currently paused")
+            }
         }
     }
 }
@@ -191,6 +206,9 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
             HuntError::RateLimitExceeded { .. } => HuntErrorCode::RateLimitExceeded,
             HuntError::ScoreOverflow => HuntErrorCode::ScoreOverflow,
+            HuntError::RegistrationsPaused => HuntErrorCode::RegistrationsPaused,
+            HuntError::AnswersPaused => HuntErrorCode::AnswersPaused,
+            HuntError::RewardsPaused => HuntErrorCode::RewardsPaused,
         }
     }
 }
