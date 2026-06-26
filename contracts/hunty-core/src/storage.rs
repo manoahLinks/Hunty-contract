@@ -1,18 +1,49 @@
 use crate::errors::HuntError;
-use crate::types::{Clue, Hunt, PlayerProgress, StoredPlayerProgress};
-use soroban_sdk::{symbol_short, Address, Env, Vec};
-
-// ~30 days at 5s/ledger. Instance TTL is bumped on every write — one call covers all keys.
-const INSTANCE_TTL_THRESHOLD: u32 = 518_400;
-const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
-
-// Persistent entries (player progress + index) live ~90 days; bumped when threshold < 30 days.
-const PERSISTENT_TTL_THRESHOLD: u32 = 518_400;
-const PERSISTENT_TTL_EXTEND_TO: u32 = 1_555_200;
+use crate::types::{Clue, Hunt, PlayerProgress};
+use soroban_sdk::{symbol_short, Address, Env, IntoVal, Vec};
 
 /// Storage access layer for hunts, clues, and player progress.
 /// Provides type-safe, efficient storage operations with consistent key management.
 pub struct Storage;
+
+// ========== TTL Constants ==========
+/// Default TTL threshold (ledgers) - extend when below this.
+const TTL_THRESHOLD_CRITICAL: u32 = 50_000;
+/// Default TTL extend to (ledgers) - for admin/config data.
+const TTL_EXTEND_CRITICAL: u32 = 500_000;
+/// TTL threshold for active hunt data (ledgers).
+const TTL_THRESHOLD_ACTIVE: u32 = 30_000;
+/// TTL extend to for active hunt data (ledgers) - ~30 days at 5s/ledger.
+const TTL_EXTEND_ACTIVE: u32 = 300_000;
+/// TTL threshold for default data (ledgers).
+const TTL_THRESHOLD_DEFAULT: u32 = 10_000;
+/// TTL extend to for default data (ledgers) - ~7 days.
+const TTL_EXTEND_DEFAULT: u32 = 100_000;
+/// TTL threshold for completed/archived data (ledgers).
+const TTL_THRESHOLD_SHORT: u32 = 5_000;
+/// TTL extend to for completed/archived data (ledgers) - ~3 days.
+const TTL_EXTEND_SHORT: u32 = 50_000;
+
+/// TTL policy categories for different data types.
+pub enum TtlPolicy {
+    Critical,
+    Active,
+    Default,
+    Short,
+}
+
+/// Extends TTL for a storage key based on the given policy.
+pub fn extend_ttl<K: IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K, policy: TtlPolicy) {
+    let (threshold, extend_to) = match policy {
+        TtlPolicy::Critical => (TTL_THRESHOLD_CRITICAL, TTL_EXTEND_CRITICAL),
+        TtlPolicy::Active => (TTL_THRESHOLD_ACTIVE, TTL_EXTEND_ACTIVE),
+        TtlPolicy::Default => (TTL_THRESHOLD_DEFAULT, TTL_EXTEND_DEFAULT),
+        TtlPolicy::Short => (TTL_THRESHOLD_SHORT, TTL_EXTEND_SHORT),
+    };
+    env.storage()
+        .persistent()
+        .extend_ttl(key, threshold, extend_to);
+}
 
 impl Storage {
     // Symbol constants for key prefixes to prevent collisions
@@ -20,55 +51,161 @@ impl Storage {
     const HUNT_KEY: soroban_sdk::Symbol = symbol_short!("HUNT");
     const CLUE_KEY: soroban_sdk::Symbol = symbol_short!("CLUE");
     const PROGRESS_KEY: soroban_sdk::Symbol = symbol_short!("PROG");
-    const PLAYER_ENTRY_KEY: soroban_sdk::Symbol = symbol_short!("PLRS");
-    const PLAYER_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PLCT");
-    const CLUE_ENTRY_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
-    const CLUE_LIST_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("CLCT");
+    const PLAYERS_LIST_KEY: soroban_sdk::Symbol = symbol_short!("PLRS");
+    const CLUES_LIST_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
     const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
     const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CCNT");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
+    const BAN_KEY: soroban_sdk::Symbol = symbol_short!("BAN");
+    const SUBMISSION_KEY: soroban_sdk::Symbol = symbol_short!("SUBMIT");
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
-    const PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("PAUSED");
+    const VIEW_ONLY_KEY: soroban_sdk::Symbol = symbol_short!("VIEW");
+    const GLOBAL_VIEW_ONLY_KEY: soroban_sdk::Symbol = symbol_short!("GVW");
+    const PAUSE_REGISTRATIONS_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_REG");
+    const PAUSE_ANSWERS_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_ANS");
+    const PAUSE_REWARDS_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_RWD");
+    
+    // Pause functions
+    pub fn set_pause_registrations(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_REGISTRATIONS_KEY, &paused);
+    }
+    pub fn is_pause_registrations(env: &Env) -> bool {
+        env.storage().instance().get(&Self::PAUSE_REGISTRATIONS_KEY).unwrap_or(false)
+    }
+    
+    pub fn set_pause_answers(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_ANSWERS_KEY, &paused);
+    }
+    pub fn is_pause_answers(env: &Env) -> bool {
+        env.storage().instance().get(&Self::PAUSE_ANSWERS_KEY).unwrap_or(false)
+    }
+    
+    pub fn set_pause_rewards(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_REWARDS_KEY, &paused);
+    }
+    pub fn is_pause_rewards(env: &Env) -> bool {
+        env.storage().instance().get(&Self::PAUSE_REWARDS_KEY).unwrap_or(false)
+    }
 
     // ========== Hunt Storage Functions ==========
 
+    /// Saves a Hunt struct with a unique key based on hunt_id.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt` - The Hunt struct to store
+    ///
+    /// # Panics
+    /// Panics if storage operation fails
     pub fn save_hunt(env: &Env, hunt: &Hunt) {
         let key = Self::hunt_key(hunt.hunt_id);
-        env.storage().instance().set(&key, hunt);
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        env.storage().persistent().set(&key, hunt);
+        let policy = match hunt.status {
+            crate::types::HuntStatus::Active => TtlPolicy::Active,
+            crate::types::HuntStatus::Completed | crate::types::HuntStatus::Cancelled => {
+                TtlPolicy::Short
+            }
+            _ => TtlPolicy::Default,
+        };
+        extend_ttl(env, &key, policy);
     }
 
+    /// Retrieves a hunt by ID, returning an Option.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The unique identifier of the hunt
+    ///
+    /// # Returns
+    /// * `Some(Hunt)` if the hunt exists, `None` otherwise
     pub fn get_hunt(env: &Env, hunt_id: u64) -> Option<Hunt> {
         let key = Self::hunt_key(hunt_id);
-        env.storage().instance().get(&key)
+        let result: Option<Hunt> = env.storage().persistent().get(&key);
+        if let Some(ref hunt) = result {
+            let policy = match hunt.status {
+                crate::types::HuntStatus::Active => TtlPolicy::Active,
+                crate::types::HuntStatus::Completed | crate::types::HuntStatus::Cancelled => {
+                    TtlPolicy::Short
+                }
+                _ => TtlPolicy::Default,
+            };
+            extend_ttl(env, &key, policy);
+        }
+        result
     }
 
+    /// Retrieves a hunt by ID or returns an error if not found.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The unique identifier of the hunt
+    ///
+    /// # Returns
+    /// * `Ok(Hunt)` if the hunt exists
+    /// * `Err(HuntError)` if the hunt is not found
     pub fn get_hunt_or_error(env: &Env, hunt_id: u64) -> Result<Hunt, HuntError> {
         Self::get_hunt(env, hunt_id).ok_or(HuntError::HuntNotFound { hunt_id })
     }
 
     // ========== Clue Storage Functions ==========
 
+    /// Stores a clue using composite keys (hunt_id + clue_id).
+    /// Also maintains a list of clue IDs for the hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt this clue belongs to
+    /// * `clue` - The Clue struct to store
     pub fn save_clue(env: &Env, hunt_id: u64, clue: &Clue) {
+        // Store the clue with composite key
         let key = Self::clue_key(hunt_id, clue.clue_id);
-        env.storage().instance().set(&key, clue);
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        env.storage().persistent().set(&key, clue);
+        extend_ttl(env, &key, TtlPolicy::Active);
+
+        // Update the list of clue IDs for this hunt
         Self::add_clue_to_list(env, hunt_id, clue.clue_id);
     }
 
+    /// Retrieves an individual clue by hunt_id and clue_id.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt this clue belongs to
+    /// * `clue_id` - The unique identifier of the clue within the hunt
+    ///
+    /// # Returns
+    /// * `Some(Clue)` if the clue exists, `None` otherwise
     pub fn get_clue(env: &Env, hunt_id: u64, clue_id: u32) -> Option<Clue> {
         let key = Self::clue_key(hunt_id, clue_id);
-        env.storage().instance().get(&key)
+        let result: Option<Clue> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Active);
+        }
+        result
     }
 
+    /// Retrieves a clue or returns an error if not found.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt this clue belongs to
+    /// * `clue_id` - The unique identifier of the clue within the hunt
+    ///
+    /// # Returns
+    /// * `Ok(Clue)` if the clue exists
+    /// * `Err(HuntError)` if the clue is not found
     pub fn get_clue_or_error(env: &Env, hunt_id: u64, clue_id: u32) -> Result<Clue, HuntError> {
         Self::get_clue(env, hunt_id, clue_id).ok_or(HuntError::ClueNotFound { hunt_id })
     }
 
+    /// Returns all clues for a specific hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to get clues for
+    ///
+    /// # Returns
+    /// A Vec containing all Clue structs for the hunt, in clue_id order
     pub fn list_clues_for_hunt(env: &Env, hunt_id: u64) -> Vec<Clue> {
         let clue_ids = Self::get_clue_ids_for_hunt(env, hunt_id);
         let mut clues = Vec::new(env);
@@ -86,28 +223,64 @@ impl Storage {
 
     // ========== Player Progress Storage Functions ==========
 
+    /// Stores player state/progress for a hunt.
+    /// Also maintains a list of registered players for the hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `progress` - The PlayerProgress struct to store
     pub fn save_player_progress(env: &Env, progress: &PlayerProgress) {
+        // Store the progress with composite key (hunt_id + player address)
         let key = Self::progress_key(progress.hunt_id, &progress.player);
-        env.storage().persistent().set(&key, &progress.to_stored());
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_EXTEND_TO);
+        env.storage().persistent().set(&key, progress);
+        let policy = if progress.is_completed || progress.reward_claimed {
+            TtlPolicy::Short
+        } else {
+            TtlPolicy::Default
+        };
+        extend_ttl(env, &key, policy);
+
+        // Update the list of players for this hunt
         Self::add_player_to_list(env, progress.hunt_id, &progress.player);
     }
 
+    /// Retrieves player progress for a specific hunt and player.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt the player is registered for
+    /// * `player` - The player's address
+    ///
+    /// # Returns
+    /// * `Some(PlayerProgress)` if progress exists, `None` otherwise
     pub fn get_player_progress(
         env: &Env,
         hunt_id: u64,
         player: &Address,
     ) -> Option<PlayerProgress> {
         let key = Self::progress_key(hunt_id, player);
-        let result = env
-            .storage()
-            .persistent()
-            .get::<_, StoredPlayerProgress>(&key)
-            .map(|stored| PlayerProgress::from_stored(env, stored, player.clone(), hunt_id))
+        let result: Option<PlayerProgress> = env.storage().persistent().get(&key);
+        if let Some(ref progress) = result {
+            let policy = if progress.is_completed || progress.reward_claimed {
+                TtlPolicy::Short
+            } else {
+                TtlPolicy::Default
+            };
+            extend_ttl(env, &key, policy);
+        }
+        result
     }
 
+    /// Retrieves player progress or returns an error if not found.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt the player is registered for
+    /// * `player` - The player's address
+    ///
+    /// # Returns
+    /// * `Ok(PlayerProgress)` if progress exists
+    /// * `Err(HuntError)` if the player is not registered
     pub fn get_player_progress_or_error(
         env: &Env,
         hunt_id: u64,
@@ -117,6 +290,14 @@ impl Storage {
             .ok_or(HuntError::PlayerNotRegistered { hunt_id })
     }
 
+    /// Returns all registered players for a hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to get players for
+    ///
+    /// # Returns
+    /// A Vec containing all PlayerProgress structs for the hunt
     pub fn get_hunt_players(env: &Env, hunt_id: u64) -> Vec<PlayerProgress> {
         let player_addresses = Self::get_player_addresses_for_hunt(env, hunt_id);
         let mut progress_list = Vec::new(env);
@@ -134,228 +315,535 @@ impl Storage {
 
     // ========== Helper Functions for Key Generation ==========
 
+    /// Generates a storage key for a hunt using a symbol prefix and hunt_id.
+    /// Uses tuple key (HUNT_KEY, hunt_id) for efficient storage access.
     fn hunt_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::HUNT_KEY, hunt_id)
     }
 
+    /// Generates a composite storage key for a clue.
+    /// Uses tuple key (CLUE_KEY, hunt_id, clue_id) for efficient storage access.
     fn clue_key(hunt_id: u64, clue_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
         (Self::CLUE_KEY, hunt_id, clue_id)
     }
 
+    /// Generates a composite storage key for player progress.
+    /// Uses tuple key (PROGRESS_KEY, hunt_id, player) for efficient storage access.
     fn progress_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
         (Self::PROGRESS_KEY, hunt_id, player.clone())
     }
 
-    fn clue_entry_key(hunt_id: u64, index: u32) -> (soroban_sdk::Symbol, u64, u32) {
-        (Self::CLUE_ENTRY_KEY, hunt_id, index)
+    /// Generates a storage key for the list of clue IDs for a hunt.
+    /// Uses tuple key (CLUES_LIST_KEY, hunt_id) for efficient storage access.
+    fn clues_list_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::CLUES_LIST_KEY, hunt_id)
     }
 
-    fn clue_list_count_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
-        (Self::CLUE_LIST_COUNT_KEY, hunt_id)
-    }
-
+    /// Generates a storage key for the clue counter per hunt.
     fn clue_counter_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::CLUE_COUNTER_KEY, hunt_id)
     }
 
-    fn player_entry_key(hunt_id: u64, index: u32) -> (soroban_sdk::Symbol, u64, u32) {
-        (Self::PLAYER_ENTRY_KEY, hunt_id, index)
+    /// Generates a storage key for the list of player addresses for a hunt.
+    /// Uses tuple key (PLAYERS_LIST_KEY, hunt_id) for efficient storage access.
+    fn players_list_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::PLAYERS_LIST_KEY, hunt_id)
     }
 
-    fn player_count_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
-        (Self::PLAYER_COUNT_KEY, hunt_id)
+    /// Key for view-only addresses for a hunt.
+    fn view_only_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::VIEW_ONLY_KEY, hunt_id)
+    }
+
+    /// Generates a storage key for a processed answer submission envelope.
+    fn processed_submission_key(
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+    ) -> (soroban_sdk::Symbol, u64, u32, Address, u64, u64) {
+        (
+            Self::SUBMISSION_KEY,
+            hunt_id,
+            clue_id,
+            player.clone(),
+            submission_nonce,
+            submitted_at,
+        )
     }
 
     // ========== Internal Helper Functions ==========
 
+    /// Adds a clue ID to the list of clues for a hunt.
+    /// This maintains an index for efficient listing.
     fn add_clue_to_list(env: &Env, hunt_id: u64, clue_id: u32) {
-        let count_key = Self::clue_list_count_key(hunt_id);
-        let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
-
-        // O(1) existence check
-        let exist_key = Self::clue_exists_key(hunt_id, clue_id);
-        if env.storage().instance().has(&exist_key) {
-            return;
-        }
-
-        env.storage()
-            .instance()
-            .set(&Self::clue_entry_key(hunt_id, count), &clue_id);
-        env.storage().instance().set(&count_key, &(count + 1));
-        env.storage().instance().set(&exist_key, &());
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
-    }
-
-    fn get_clue_ids_for_hunt(env: &Env, hunt_id: u64) -> Vec<u32> {
-        let count_key = Self::clue_list_count_key(hunt_id);
-        let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
-        let mut ids = Vec::new(env);
-        let start = offset;
-        let end = core::cmp::min(offset.saturating_add(limit), count);
-        if start >= count {
-            return ids;
-        }
-        for i in start..end {
-            let entry_key = Self::clue_entry_key(hunt_id, i);
-            if let Some(id) = env.storage().instance().get(&entry_key) {
-                ids.push_back(id);
-            }
-        }
-        ids
-    }
-
-    fn add_player_to_list(env: &Env, hunt_id: u64, player: &Address) {
-        let count_key = Self::player_count_key(hunt_id);
-        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
-
-        // O(1) existence check
-        let exist_key = (symbol_short!("PLEX"), hunt_id, player.clone());
-        if env.storage().persistent().has(&exist_key) {
-            // Bump the exist marker so this player's slot never silently expires
-            env.storage().persistent().extend_ttl(
-                &exist_key,
-                PERSISTENT_TTL_THRESHOLD,
-                PERSISTENT_TTL_EXTEND_TO,
-            );
-            return;
-        }
-
-        env.storage()
+        let key = Self::clues_list_key(hunt_id);
+        let mut clue_ids = env
+            .storage()
             .persistent()
-            .set(&Self::player_entry_key(hunt_id, count), player);
-        let entry_key = Self::player_entry_key(hunt_id, count);
-        env.storage().persistent().set(&entry_key, player);
-        env.storage().persistent().extend_ttl(
-            &entry_key,
-            PERSISTENT_TTL_THRESHOLD,
-            PERSISTENT_TTL_EXTEND_TO,
-        );
-        env.storage().persistent().set(&count_key, &(count + 1));
-        env.storage().persistent().extend_ttl(
-            &count_key,
-            PERSISTENT_TTL_THRESHOLD,
-            PERSISTENT_TTL_EXTEND_TO,
-        );
-        env.storage().persistent().set(&exist_key, &());
-        env.storage().persistent().extend_ttl(
-            &exist_key,
-            PERSISTENT_TTL_THRESHOLD,
-            PERSISTENT_TTL_EXTEND_TO,
-        );
-    }
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
 
-    fn get_player_addresses_for_hunt(env: &Env, hunt_id: u64) -> Vec<Address> {
-        let count_key = Self::player_count_key(hunt_id);
-        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
-        let mut addrs = Vec::new(env);
-        for i in 0..count {
-            let entry_key = Self::player_entry_key(hunt_id, i);
-            if let Some(addr) = env.storage().persistent().get::<_, Address>(&entry_key) {
-                env.storage().persistent().extend_ttl(
-                    &entry_key,
-                    PERSISTENT_TTL_THRESHOLD,
-                    PERSISTENT_TTL_EXTEND_TO,
-                );
-                addrs.push_back(addr);
+        // Check if clue_id already exists to avoid duplicates
+        let mut exists = false;
+        for i in 0..clue_ids.len() {
+            if let Some(id) = clue_ids.get(i) {
+                if id == clue_id {
+                    exists = true;
+                    break;
+                }
             }
         }
-        addrs
+
+        if !exists {
+            clue_ids.push_back(clue_id);
+            env.storage().persistent().set(&key, &clue_ids);
+        }
+        extend_ttl(env, &key, TtlPolicy::Active);
     }
 
-    fn clue_exists_key(hunt_id: u64, clue_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
-        (symbol_short!("CLEX"), hunt_id, clue_id)
+    /// Retrieves the list of clue IDs for a hunt.
+    fn get_clue_ids_for_hunt(env: &Env, hunt_id: u64) -> Vec<u32> {
+        let key = Self::clues_list_key(hunt_id);
+        let result: Option<Vec<u32>> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Active);
+        }
+        result.unwrap_or_else(|| Vec::new(env))
+    }
+
+    /// Adds a player address to the list of players for a hunt.
+    /// This maintains an index for efficient listing.
+    fn add_player_to_list(env: &Env, hunt_id: u64, player: &Address) {
+        let key = Self::players_list_key(hunt_id);
+        let mut players = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+
+        // Check if player already exists to avoid duplicates
+        let mut exists = false;
+        for i in 0..players.len() {
+            if let Some(addr) = players.get(i) {
+                if addr == *player {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+
+        if !exists {
+            players.push_back(player.clone());
+            env.storage().persistent().set(&key, &players);
+        }
+        extend_ttl(env, &key, TtlPolicy::Default);
+    }
+
+    /// Retrieves the list of player addresses for a hunt.
+    fn get_player_addresses_for_hunt(env: &Env, hunt_id: u64) -> Vec<Address> {
+        let key = Self::players_list_key(hunt_id);
+        let result: Option<Vec<Address>> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Default);
+        }
+        result.unwrap_or_else(|| Vec::new(env))
     }
 
     // ========== Hunt Counter Functions ==========
 
+    /// Increments and returns the next hunt ID.
+    /// This ensures unique, sequential hunt IDs.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    /// The next available hunt ID (starting from 1)
     pub fn next_hunt_id(env: &Env) -> u64 {
         let key = Self::HUNT_COUNTER_KEY;
-        let current: u64 = env.storage().instance().get(&key).unwrap_or(0);
+        let current: u64 = env.storage().persistent().get(&key).unwrap_or(0);
         let next = current + 1;
-        env.storage().instance().set(&key, &next);
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        env.storage().persistent().set(&key, &next);
+        extend_ttl(env, &key, TtlPolicy::Critical);
         next
     }
 
+    /// Gets the current hunt counter value without incrementing.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    /// The current hunt counter value (0 if no hunts have been created)
     pub fn get_hunt_counter(env: &Env) -> u64 {
         let key = Self::HUNT_COUNTER_KEY;
-        env.storage().instance().get(&key).unwrap_or(0)
+        let result: Option<u64> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Critical);
+        }
+        result.unwrap_or(0)
     }
 
     // ========== Clue Counter (per hunt) Functions ==========
 
+    /// Increments and returns the next clue ID for a hunt.
+    /// Clue IDs are sequential within each hunt, starting from 1.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to allocate a clue ID for
+    ///
+    /// # Returns
+    /// The next available clue ID for the hunt
     pub fn next_clue_id(env: &Env, hunt_id: u64) -> u32 {
         let key = Self::clue_counter_key(hunt_id);
-        let current: u32 = env.storage().instance().get(&key).unwrap_or(0);
+        let current: u32 = env.storage().persistent().get(&key).unwrap_or(0);
         let next = current + 1;
-        env.storage().instance().set(&key, &next);
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        env.storage().persistent().set(&key, &next);
+        extend_ttl(env, &key, TtlPolicy::Active);
         next
     }
 
-    /// Gets the current number of indexed clues for a hunt.
+    /// Gets the current clue counter for a hunt without incrementing.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `hunt_id` - The hunt to get the clue count for
     ///
     /// # Returns
-    /// The number of clues currently stored for the hunt (0 if none)
+    /// The number of clues added so far for the hunt (0 if none)
     pub fn get_clue_counter(env: &Env, hunt_id: u64) -> u32 {
-        let key = Self::clue_list_count_key(hunt_id);
-        env.storage().instance().get(&key).unwrap_or(0)
+        let key = Self::clue_counter_key(hunt_id);
+        let result: Option<u32> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Active);
+        }
+        result.unwrap_or(0)
     }
 
     // ========== Reward Manager Storage Functions ==========
 
     pub fn set_reward_manager(env: &Env, address: &Address) {
-        env.storage().instance().set(&Self::REWARD_MGR_KEY, address);
         env.storage()
-            .instance()
+            .persistent()
             .set(&Self::REWARD_MGR_KEY, address);
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        extend_ttl(env, &Self::REWARD_MGR_KEY, TtlPolicy::Critical);
     }
 
     pub fn get_reward_manager(env: &Env) -> Option<Address> {
-        env.storage().instance().get(&Self::REWARD_MGR_KEY)
+        let result: Option<Address> = env.storage().persistent().get(&Self::REWARD_MGR_KEY);
+        if result.is_some() {
+            extend_ttl(env, &Self::REWARD_MGR_KEY, TtlPolicy::Critical);
+        }
+        result
     }
 
-    // ========== Contract Admin / Pause Storage Functions ==========
-
-    pub fn set_admin(env: &Env, admin: &Address) {
-        env.storage().instance().set(&Self::ADMIN_KEY, admin);
+    pub fn save_processed_submission(
+        env: &Env,
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+        expires_at: u64,
+    ) {
+        let key = Self::processed_submission_key(
+            hunt_id,
+            clue_id,
+            player,
+            submission_nonce,
+            submitted_at,
+        );
+        env.storage().persistent().set(&key, &expires_at);
     }
 
-    pub fn get_admin(env: &Env) -> Option<Address> {
-        env.storage().instance().get(&Self::ADMIN_KEY)
+    pub fn get_processed_submission_expiry(
+        env: &Env,
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+    ) -> Option<u64> {
+        let key = Self::processed_submission_key(
+            hunt_id,
+            clue_id,
+            player,
+            submission_nonce,
+            submitted_at,
+        );
+        env.storage().persistent().get(&key)
     }
 
-    pub fn set_contract_paused(env: &Env, paused: bool) {
-        env.storage().instance().set(&Self::PAUSED_KEY, &paused);
-    }
-
-    pub fn is_contract_paused(env: &Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&Self::PAUSED_KEY)
-            .unwrap_or(false)
+    pub fn remove_processed_submission(
+        env: &Env,
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+        submission_nonce: u64,
+        submitted_at: u64,
+    ) {
+        let key = Self::processed_submission_key(
+            hunt_id,
+            clue_id,
+            player,
+            submission_nonce,
+            submitted_at,
+        );
+        env.storage().persistent().remove(&key);
     }
 
     // --- Contract version ---
 
-    pub fn set_contract_version(env: &Env, version: &crate::types::SemVer) {
-        env.storage().instance().set(&symbol_short!("CVER"), version);
+    #[allow(dead_code)]
+    pub fn set_contract_version(env: &Env, version: u32) {
+        env.storage()
+            .instance()
+            .set(&symbol_short!("CVER"), &version);
     }
 
-    pub fn get_contract_version(env: &Env) -> Option<crate::types::SemVer> {
+    #[allow(dead_code)]
+    pub fn get_contract_version(env: &Env) -> Option<u32> {
         env.storage().instance().get(&symbol_short!("CVER"))
+    }
+
+    // ========== View-Only Access Functions ==========
+
+    /// Adds an address to the view-only list for a specific hunt.
+    /// View-only addresses can read hunt data but cannot modify it.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to grant view-only access for
+    /// * `address` - The address to grant view-only access
+    pub fn add_view_only(env: &Env, hunt_id: u64, address: &Address) {
+        let key = Self::view_only_key(hunt_id);
+        let mut view_only_list = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        // Check if address already exists to avoid duplicates
+        if view_only_list.first_index_of(address).is_none() {
+            view_only_list.push_back(address.clone());
+            env.storage().instance().set(&key, &view_only_list);
+        }
+    }
+
+    /// Removes an address from the view-only list for a specific hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to revoke view-only access for
+    /// * `address` - The address to revoke view-only access
+    pub fn remove_view_only(env: &Env, hunt_id: u64, address: &Address) {
+        let key = Self::view_only_key(hunt_id);
+        let mut view_only_list = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        if let Some(idx) = view_only_list.first_index_of(address) {
+            view_only_list.remove(idx);
+            env.storage().instance().set(&key, &view_only_list);
+        }
+    }
+
+    /// Checks if an address has view-only access for a specific hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to check view-only access for
+    /// * `address` - The address to check
+    ///
+    /// # Returns
+    /// `true` if the address has view-only access, `false` otherwise
+    pub fn is_view_only(env: &Env, hunt_id: u64, address: &Address) -> bool {
+        let key = Self::view_only_key(hunt_id);
+        let view_only_list = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        view_only_list.first_index_of(address).is_some()
+    }
+
+    /// Gets all view-only addresses for a specific hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to get view-only addresses for
+    ///
+    /// # Returns
+    /// A vector of all addresses with view-only access for the hunt
+    pub fn get_view_only_list(env: &Env, hunt_id: u64) -> Vec<Address> {
+        let key = Self::view_only_key(hunt_id);
+        env.storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    // ========== Global Admin Functions ==========
+
+    /// Checks if an address is the contract admin
+    pub fn is_admin(env: &Env, address: &Address) -> bool {
+        if let Some(admin) = Self::get_admin(env) {
+            admin == *address
+        } else {
+            false
+        }
+    }
+    
+    /// Sets the contract admin address.
+    /// The admin can manage global view-only access.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `admin` - The admin address
+    pub fn set_admin(env: &Env, admin: &Address) {
+        env.storage().instance().set(&Self::ADMIN_KEY, admin);
+    }
+
+    /// Gets the contract admin address.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    /// The admin address if set, None otherwise
+    pub fn get_admin(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&Self::ADMIN_KEY)
+    }
+    
+    // Backward compatibility: general pause
+    const PAUSE_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE");
+    pub fn set_paused(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_KEY, &paused);
+    }
+    pub fn is_paused(env: &Env) -> bool {
+        env.storage().instance().get(&Self::PAUSE_KEY).unwrap_or(false)
+    }
+    
+    // Blacklist functions for backward compatibility
+    const BLACKLIST_KEY: soroban_sdk::Symbol = symbol_short!("BLACKLIST");
+    pub fn set_blacklisted(env: &Env, address: &Address, blacklisted: bool) {
+        if blacklisted {
+            let mut list = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+            if list.first_index_of(address).is_none() {
+                list.push_back(address.clone());
+                env.storage().instance().set(&Self::BLACKLIST_KEY, &list);
+            }
+        } else {
+            let mut list = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+            if let Some(idx) = list.first_index_of(address) {
+                list.remove(idx);
+                env.storage().instance().set(&Self::BLACKLIST_KEY, &list);
+            }
+        }
+    }
+    pub fn is_blacklisted(env: &Env, address: &Address) -> bool {
+        let list: Vec<Address> = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+        list.first_index_of(address).is_some()
+    }
+    
+    // Helper functions for emergency stop (placeholder for now)
+    pub fn get_active_hunt_ids(_env: &Env) -> Vec<u64> {
+        Vec::new(_env)
+    }
+    pub fn set_hunt_status(_env: &Env, _hunt_id: u64, _status: crate::types::HuntStatus) {
+        // Placeholder
+    }
+
+    /// Adds an address to the global view-only list.
+    /// Global view-only addresses can read ALL hunt data.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `address` - The address to grant global view-only access
+    pub fn add_global_view_only(env: &Env, address: &Address) {
+        let mut view_only_list = env
+            .storage()
+            .instance()
+            .get(&Self::GLOBAL_VIEW_ONLY_KEY)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        // Check if address already exists to avoid duplicates
+        if view_only_list.first_index_of(address).is_none() {
+            view_only_list.push_back(address.clone());
+            env.storage().instance().set(&Self::GLOBAL_VIEW_ONLY_KEY, &view_only_list);
+        }
+    }
+
+    /// Removes an address from the global view-only list.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `address` - The address to revoke global view-only access
+    pub fn remove_global_view_only(env: &Env, address: &Address) {
+        let mut view_only_list = env
+            .storage()
+            .instance()
+            .get(&Self::GLOBAL_VIEW_ONLY_KEY)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        if let Some(idx) = view_only_list.first_index_of(address) {
+            view_only_list.remove(idx);
+            env.storage().instance().set(&Self::GLOBAL_VIEW_ONLY_KEY, &view_only_list);
+        }
+    }
+
+    /// Checks if an address has global view-only access.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `address` - The address to check
+    ///
+    /// # Returns
+    /// `true` if the address has global view-only access, `false` otherwise
+    pub fn is_global_view_only(env: &Env, address: &Address) -> bool {
+        let view_only_list = env
+            .storage()
+            .instance()
+            .get(&Self::GLOBAL_VIEW_ONLY_KEY)
+            .unwrap_or_else(|| Vec::new(env));
+        
+        view_only_list.first_index_of(address).is_some()
+    }
+
+    /// Gets all global view-only addresses.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    /// A vector of all addresses with global view-only access
+    pub fn get_global_view_only_list(env: &Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&Self::GLOBAL_VIEW_ONLY_KEY)
+            .unwrap_or_else(|| Vec::new(env))
+
+    // ========== Ban Storage Functions ==========
+
+    fn ban_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::BAN_KEY, hunt_id, player.clone())
+    }
+
+    pub fn ban_player(env: &Env, hunt_id: u64, player: &Address) {
+        env.storage().persistent().set(&Self::ban_key(hunt_id, player), &());
+    }
+
+    pub fn unban_player(env: &Env, hunt_id: u64, player: &Address) {
+        env.storage().persistent().remove(&Self::ban_key(hunt_id, player));
+    }
+
+    pub fn is_banned(env: &Env, hunt_id: u64, player: &Address) -> bool {
+        env.storage().persistent().has(&Self::ban_key(hunt_id, player))
     }
 }

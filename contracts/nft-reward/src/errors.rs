@@ -12,7 +12,7 @@ pub enum NftErrorCode {
     InvalidRarity = 6,
     AlreadyInitialized = 7,
     MaxSupplyReached = 8,
-    NotOperator = 9,
-    /// Remote contract version is incompatible (major version mismatch).
-    IncompatibleVersion = 10,
+    NotInitialized = 9,
+    NotOperator = 10,
+    NftNotTransferable = 11,
 }
