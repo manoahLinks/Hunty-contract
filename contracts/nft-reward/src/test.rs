@@ -1014,3 +1014,447 @@ fn test_migration_dry_run_does_not_write() {
         assert!(!env.storage().persistent().has(&nft_version_key));
     });
 }
+
+// ---------------------------------------------------------------------------
+// NFT Transfer edge case tests
+// ---------------------------------------------------------------------------
+
+/// Helper: mint a soulbound (non-transferable) NFT via mint_reward_nft.
+/// By default, mint_reward_nft sets transferable = false.
+fn mint_soulbound(
+    env: &Env,
+    client: &NftRewardClient<'_>,
+    hunt_id: u64,
+    owner: &Address,
+    metadata: &NftMetadata,
+) -> u64 {
+    client.mint_reward_nft(owner, &hunt_id, owner, metadata)
+}
+
+// --- Transfer to self ---
+
+#[test]
+fn test_transfer_to_self_is_rejected() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Self Transfer", "desc", "ipfs://self");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    // Transferring to oneself should return InvalidRecipient
+    let result = client.try_transfer_nft(&nft_id, &owner, &owner, &owner);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::NftErrorCode::InvalidRecipient)),
+        "transfer to self must return InvalidRecipient"
+    );
+}
+
+#[test]
+fn test_transfer_to_self_does_not_mutate_state() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "No State Change", "desc", "ipfs://nsc");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    // Attempt (and ignore error) — ownership must be unchanged
+    let _ = client.try_transfer_nft(&nft_id, &owner, &owner, &owner);
+
+    assert_eq!(
+        client.owner_of(&nft_id),
+        Some(owner.clone()),
+        "owner must remain the same after rejected self-transfer"
+    );
+    let owner_nfts = client.get_player_nfts(&owner, &0, &100);
+    assert_eq!(
+        owner_nfts.len(),
+        1,
+        "player NFT index must be unchanged after rejected self-transfer"
+    );
+}
+
+// --- Transfer non-existent NFT ---
+
+#[test]
+fn test_transfer_nonexistent_nft_returns_not_found() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    let result = client.try_transfer_nft(&9999, &from, &to, &from);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::NftErrorCode::NftNotFound)),
+        "transferring a non-existent NFT must return NftNotFound"
+    );
+}
+
+#[test]
+fn test_transfer_id_zero_returns_not_found() {
+    // NFT IDs start at 1; ID 0 should never exist.
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    let result = client.try_transfer_nft(&0, &from, &to, &from);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::NftErrorCode::NftNotFound)),
+        "transferring NFT id=0 must return NftNotFound"
+    );
+}
+
+// --- Transfer by non-owner ---
+
+#[test]
+fn test_transfer_by_non_owner_returns_not_owner() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Owned NFT", "desc", "ipfs://owned");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    // attacker passes their own address as `from`, which doesn't match the actual owner
+    let result = client.try_transfer_nft(&nft_id, &attacker, &recipient, &attacker);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::NftErrorCode::NotOwner)),
+        "transfer where from != actual owner must return NotOwner"
+    );
+}
+
+#[test]
+fn test_transfer_by_non_owner_does_not_change_ownership() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Guard NFT", "desc", "ipfs://guard");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    let _ = client.try_transfer_nft(&nft_id, &attacker, &recipient, &attacker);
+
+    assert_eq!(
+        client.owner_of(&nft_id),
+        Some(owner.clone()),
+        "ownership must be unchanged after failed transfer attempt by non-owner"
+    );
+    // attacker and recipient should have no NFTs
+    assert_eq!(client.get_player_nfts(&attacker, &0, &100).len(), 0);
+    assert_eq!(client.get_player_nfts(&recipient, &0, &100).len(), 0);
+}
+
+#[test]
+fn test_transfer_caller_not_operator_returns_not_operator() {
+    // `from` is the real owner but `caller` is neither owner nor approved operator
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let third_party = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Operator Test", "desc", "ipfs://op");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    // caller is third_party (not owner, not operator)
+    let result = client.try_transfer_nft(&nft_id, &owner, &recipient, &third_party);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::NftErrorCode::NotOperator)),
+        "transfer by unapproved caller must return NotOperator"
+    );
+}
+
+#[test]
+fn test_operator_can_transfer_on_behalf_of_owner() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Operator Xfer", "desc", "ipfs://opxfer");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    client.set_operator(&owner, &operator);
+    client.transfer_nft(&nft_id, &owner, &recipient, &operator);
+
+    assert_eq!(
+        client.owner_of(&nft_id),
+        Some(recipient.clone()),
+        "operator-initiated transfer must update ownership to recipient"
+    );
+}
+
+#[test]
+fn test_revoked_operator_cannot_transfer() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Revoke Test", "desc", "ipfs://revoke");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    client.set_operator(&owner, &operator);
+    client.remove_operator(&owner, &operator);
+
+    let result = client.try_transfer_nft(&nft_id, &owner, &recipient, &operator);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::NftErrorCode::NotOperator)),
+        "revoked operator must not be able to transfer"
+    );
+    assert_eq!(client.owner_of(&nft_id), Some(owner.clone()));
+}
+
+// --- Transfer soulbound NFT ---
+
+#[test]
+fn test_transfer_soulbound_nft_returns_soulbound_error() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Soulbound NFT", "non-transferable", "ipfs://soul");
+
+    // mint_reward_nft defaults to transferable = false (soulbound)
+    let nft_id = mint_soulbound(&env, &client, 1, &owner, &metadata);
+
+    let result = client.try_transfer_nft(&nft_id, &owner, &recipient, &owner);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::NftErrorCode::SoulboundNft)),
+        "transferring a soulbound NFT must return SoulboundNft"
+    );
+}
+
+#[test]
+fn test_soulbound_nft_ownership_unchanged_after_attempted_transfer() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Bound Trophy", "soul", "ipfs://bound");
+    let nft_id = mint_soulbound(&env, &client, 1, &owner, &metadata);
+
+    let _ = client.try_transfer_nft(&nft_id, &owner, &recipient, &owner);
+
+    // owner still holds the NFT
+    assert_eq!(client.owner_of(&nft_id), Some(owner.clone()));
+    assert_eq!(client.get_player_nfts(&owner, &0, &100).len(), 1);
+    assert_eq!(client.get_player_nfts(&recipient, &0, &100).len(), 0);
+}
+
+#[test]
+fn test_soulbound_nft_operator_cannot_override_soulbound() {
+    // Even an approved operator should not be able to transfer a soulbound NFT.
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Soul + Op", "soul", "ipfs://soulop");
+    let nft_id = mint_soulbound(&env, &client, 1, &owner, &metadata);
+
+    client.set_operator(&owner, &operator);
+
+    let result = client.try_transfer_nft(&nft_id, &owner, &recipient, &operator);
+    assert_eq!(
+        result,
+        Err(Ok(crate::errors::NftErrorCode::SoulboundNft)),
+        "an operator must not be able to bypass the soulbound restriction"
+    );
+    assert_eq!(client.owner_of(&nft_id), Some(owner.clone()));
+}
+
+// --- Transfer and verify ownership update ---
+
+#[test]
+fn test_transfer_updates_owner_field_in_nft_data() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let metadata = create_metadata(&env, "Ownership Check", "desc", "ipfs://oc");
+    let nft_id = mint_transferable(&env, &client, 1, &alice, &metadata);
+
+    client.transfer_nft(&nft_id, &alice, &bob, &alice);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.owner, bob, "NftData.owner must reflect the new owner");
+}
+
+#[test]
+fn test_transfer_updates_owner_of_query() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let metadata = create_metadata(&env, "OwnerOf Query", "desc", "ipfs://oq");
+    let nft_id = mint_transferable(&env, &client, 1, &alice, &metadata);
+
+    client.transfer_nft(&nft_id, &alice, &bob, &alice);
+
+    assert_eq!(client.owner_of(&nft_id), Some(bob.clone()));
+    assert_eq!(client.get_nft_owner(&nft_id), Some(bob));
+}
+
+#[test]
+fn test_transfer_updates_player_nft_indexes_correctly() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+
+    // Mint two NFTs for alice
+    let m1 = create_metadata(&env, "NFT A", "a", "ipfs://a");
+    let m2 = create_metadata(&env, "NFT B", "b", "ipfs://b");
+    let nft1 = mint_transferable(&env, &client, 1, &alice, &m1);
+    let nft2 = mint_transferable(&env, &client, 2, &alice, &m2);
+
+    assert_eq!(client.get_player_nfts(&alice, &0, &100).len(), 2);
+    assert_eq!(client.get_player_nfts(&bob, &0, &100).len(), 0);
+
+    // Transfer nft1 to bob
+    client.transfer_nft(&nft1, &alice, &bob, &alice);
+
+    let alice_nfts = client.get_player_nfts(&alice, &0, &100);
+    assert_eq!(alice_nfts.len(), 1, "alice must have 1 NFT remaining");
+    assert_eq!(
+        alice_nfts.get(0).unwrap(),
+        nft2,
+        "alice's remaining NFT must be nft2"
+    );
+
+    let bob_nfts = client.get_player_nfts(&bob, &0, &100);
+    assert_eq!(bob_nfts.len(), 1, "bob must have 1 NFT after transfer");
+    assert_eq!(
+        bob_nfts.get(0).unwrap(),
+        nft1,
+        "bob's NFT must be the transferred nft1"
+    );
+}
+
+#[test]
+fn test_transfer_preserves_completion_player_field() {
+    // completion_player is the address that originally completed the hunt —
+    // it must be immutable even after ownership changes.
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let original_player = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Provenance NFT", "desc", "ipfs://prov");
+    let nft_id = mint_transferable(&env, &client, 1, &original_player, &metadata);
+
+    client.transfer_nft(&nft_id, &original_player, &new_owner, &original_player);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(
+        nft.completion_player, original_player,
+        "completion_player must not change after a transfer"
+    );
+    assert_eq!(nft.owner, new_owner);
+}
+
+#[test]
+fn test_transfer_preserves_metadata_fields() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let metadata = create_metadata_full(
+        &env,
+        "Rare Trophy",
+        "Very rare",
+        "ipfs://rare",
+        "Epic Hunt",
+        4,
+        2,
+    );
+    let nft_id = mint_transferable(&env, &client, 42, &alice, &metadata);
+
+    client.transfer_nft(&nft_id, &alice, &bob, &alice);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.title, String::from_str(&env, "Rare Trophy"));
+    assert_eq!(nft.metadata.description, String::from_str(&env, "Very rare"));
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "ipfs://rare"));
+    assert_eq!(nft.metadata.hunt_title, String::from_str(&env, "Epic Hunt"));
+    assert_eq!(nft.metadata.rarity, 4);
+    assert_eq!(nft.metadata.tier, 2);
+    assert_eq!(nft.hunt_id, 42);
+}
+
+#[test]
+fn test_chained_transfers_track_ownership_correctly() {
+    // A → B → C: each step must correctly update owner and player indexes.
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+    let metadata = create_metadata(&env, "Chain NFT", "chain", "ipfs://chain");
+    let nft_id = mint_transferable(&env, &client, 1, &a, &metadata);
+
+    // A → B
+    client.transfer_nft(&nft_id, &a, &b, &a);
+    assert_eq!(client.owner_of(&nft_id), Some(b.clone()));
+    assert_eq!(client.get_player_nfts(&a, &0, &100).len(), 0);
+    assert_eq!(client.get_player_nfts(&b, &0, &100).len(), 1);
+
+    // B → C
+    client.transfer_nft(&nft_id, &b, &c, &b);
+    assert_eq!(client.owner_of(&nft_id), Some(c.clone()));
+    assert_eq!(client.get_player_nfts(&b, &0, &100).len(), 0);
+    assert_eq!(client.get_player_nfts(&c, &0, &100).len(), 1);
+}
+
+#[test]
+fn test_transfer_emits_nft_transferred_event_with_correct_fields() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let metadata = create_metadata(&env, "Event Check", "desc", "ipfs://ev");
+    let nft_id = mint_transferable(&env, &client, 1, &from, &metadata);
+
+    client.transfer_nft(&nft_id, &from, &to, &from);
+
+    let events = env.events().all();
+    // Find the NftTransferred event (last event published)
+    let (_contract, topics, data) = events.get(events.len() - 1).unwrap();
+
+    // topics[0] == "NftTransferred", topics[1] == nft_id
+    let topic0: Symbol = Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap();
+    assert_eq!(topic0, Symbol::new(&env, "NftTransferred"));
+
+    let event: crate::NftTransferredEvent =
+        crate::NftTransferredEvent::try_from_val(&env, &data).unwrap();
+    assert_eq!(event.nft_id, nft_id);
+    assert_eq!(event.from, from);
+    assert_eq!(event.to, to);
+}

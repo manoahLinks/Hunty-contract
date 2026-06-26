@@ -15,4 +15,5 @@ pub enum NftErrorCode {
     NotInitialized = 9,
     NotOperator = 10,
     NftNotTransferable = 11,
+    NftLocked = 12,
 }
