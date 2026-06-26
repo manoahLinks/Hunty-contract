@@ -4700,4 +4700,292 @@ fn test_get_hunt_statistics_mixed_completion_states() {
         let amount = config.reward_per_winner();
         assert_eq!(amount, 2, "xlm_pool=7 / max_winners=3 must round down to 2");
     }
+
+    // ========== Storage-tier consistency tests (issue #84: TTL mismatch) ==========
+    //
+    // These tests guard against re-introducing instance storage for hunt/clue data.
+    // Previously, Hunt structs and clue indexes lived in instance storage (shared
+    // TTL) while player progress used persistent storage (per-key TTL).  If the
+    // instance entry expired, all hunt/clue data was lost while player records
+    // survived, causing permanent inconsistency.  All data must now live in
+    // persistent storage so TTLs age together.
+
+    /// Hunt data must remain readable after a player registers.
+    /// In the buggy code, registering a player bumped only persistent TTLs; the
+    /// instance entry could expire independently, making the hunt invisible.
+    #[test]
+    fn test_hunt_data_readable_after_player_registration() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "TTL Hunt"),
+                String::from_str(env, "Hunt for TTL mismatch test"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                creator.clone(),
+                hunt_id,
+                String::from_str(env, "What is 2+2?"),
+                String::from_str(env, "four"),
+                10,
+                true,
+            )
+            .unwrap();
+            HuntyCore::activate_hunt(env.clone(), creator.clone(), hunt_id).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        // After player registration, hunt data must still be readable.
+        as_core_contract(&env, &contract_id, |env| {
+            let hunt = Storage::get_hunt(env, hunt_id).expect("hunt must survive player registration");
+            assert_eq!(hunt.hunt_id, hunt_id);
+            assert_eq!(hunt.status, HuntStatus::Active);
+            assert_eq!(hunt.total_clues, 1);
+        });
+    }
+
+    /// Clue index (previously in instance storage) must remain correct after
+    /// player operations touch only persistent storage entries.
+    #[test]
+    fn test_clue_index_readable_after_player_submits_answer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            let hid = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Clue Index Hunt"),
+                String::from_str(env, "Testing clue index persistence"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(
+                env.clone(),
+                creator.clone(),
+                hid,
+                String::from_str(env, "What is the capital of France?"),
+                String::from_str(env, "paris"),
+                20,
+                true,
+            )
+            .unwrap();
+            HuntyCore::add_clue(
+                env.clone(),
+                creator.clone(),
+                hid,
+                String::from_str(env, "What is 3 * 3?"),
+                String::from_str(env, "nine"),
+                10,
+                false,
+            )
+            .unwrap();
+            HuntyCore::activate_hunt(env.clone(), creator.clone(), hid).unwrap();
+            HuntyCore::register_player(env.clone(), hid, player.clone()).unwrap();
+            HuntyCore::submit_answer(
+                env.clone(),
+                hid,
+                player.clone(),
+                1,
+                String::from_str(env, "paris"),
+            )
+            .unwrap();
+            hid
+        });
+
+        // Clue list query must still return both clues after the player submitted an answer.
+        as_core_contract(&env, &contract_id, |env| {
+            let clues = Storage::list_clues_for_hunt(env, hunt_id);
+            assert_eq!(clues.len(), 2, "both clues must be in persistent index after player submission");
+            let clue1 = Storage::get_clue(env, hunt_id, 1).expect("clue 1 must be readable");
+            let clue2 = Storage::get_clue(env, hunt_id, 2).expect("clue 2 must be readable");
+            assert_eq!(clue1.points, 20);
+            assert_eq!(clue2.points, 10);
+        });
+    }
+
+    /// Full end-to-end consistency: after every stage of a hunt lifecycle,
+    /// hunt metadata, clue index, and player progress must all be readable.
+    #[test]
+    fn test_hunt_clue_and_player_data_consistent_across_full_lifecycle() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let player_a = Address::generate(&env);
+        let player_b = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Full Lifecycle Hunt"),
+                String::from_str(env, "Consistency check across all stages"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        // Stage 1: add clues — hunt and clue data both readable.
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(env.clone(), creator.clone(), hunt_id, String::from_str(env, "Q1"), String::from_str(env, "ans1"), 10, true).unwrap();
+            HuntyCore::add_clue(env.clone(), creator.clone(), hunt_id, String::from_str(env, "Q2"), String::from_str(env, "ans2"), 20, false).unwrap();
+            HuntyCore::add_clue(env.clone(), creator.clone(), hunt_id, String::from_str(env, "Q3"), String::from_str(env, "ans3"), 30, false).unwrap();
+        });
+
+        as_core_contract(&env, &contract_id, |env| {
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.total_clues, 3, "stage 1: hunt must report 3 clues");
+            assert_eq!(Storage::list_clues_for_hunt(env, hunt_id).len(), 3, "stage 1: clue index must have 3 entries");
+        });
+
+        // Stage 2: activate and register two players.
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::activate_hunt(env.clone(), creator.clone(), hunt_id).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player_a.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player_b.clone()).unwrap();
+        });
+
+        as_core_contract(&env, &contract_id, |env| {
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.status, HuntStatus::Active, "stage 2: hunt must be active");
+            assert_eq!(Storage::list_clues_for_hunt(env, hunt_id).len(), 3, "stage 2: clue index intact after registration");
+            let prog_a = Storage::get_player_progress(env, hunt_id, &player_a).expect("player A must be registered");
+            let prog_b = Storage::get_player_progress(env, hunt_id, &player_b).expect("player B must be registered");
+            assert!(!prog_a.is_completed);
+            assert!(!prog_b.is_completed);
+        });
+
+        // Stage 3: player A completes the required clue.
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                player_a.clone(),
+                1,
+                String::from_str(env, "ans1"),
+            )
+            .unwrap();
+        });
+
+        // After player A's submission, hunt and clue data must be unchanged and readable.
+        as_core_contract(&env, &contract_id, |env| {
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert_eq!(hunt.total_clues, 3, "stage 3: hunt total_clues must not be mutated by player submission");
+            assert_eq!(Storage::list_clues_for_hunt(env, hunt_id).len(), 3, "stage 3: clue index must be unchanged");
+            let prog_a = Storage::get_player_progress(env, hunt_id, &player_a).unwrap();
+            assert!(prog_a.total_score > 0, "stage 3: player A score must be > 0 after solving clue 1");
+            // Player B untouched.
+            let prog_b = Storage::get_player_progress(env, hunt_id, &player_b).unwrap();
+            assert_eq!(prog_b.total_score, 0, "stage 3: player B score must still be 0");
+        });
+    }
+
+    /// Multiple independent hunts must each maintain their own isolated clue
+    /// indexes in persistent storage (no cross-contamination from shared instance).
+    #[test]
+    fn test_multiple_hunts_maintain_isolated_persistent_clue_indexes() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let (hunt_a, hunt_b) = as_core_contract(&env, &contract_id, |env| {
+            let a = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt A"),
+                String::from_str(env, "First hunt"),
+                None,
+                None,
+            )
+            .unwrap();
+            let b = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt B"),
+                String::from_str(env, "Second hunt"),
+                None,
+                None,
+            )
+            .unwrap();
+            // Hunt A gets 2 clues, Hunt B gets 1.
+            HuntyCore::add_clue(env.clone(), creator.clone(), a, String::from_str(env, "Q1"), String::from_str(env, "a1"), 5, true).unwrap();
+            HuntyCore::add_clue(env.clone(), creator.clone(), a, String::from_str(env, "Q2"), String::from_str(env, "a2"), 5, false).unwrap();
+            HuntyCore::add_clue(env.clone(), creator.clone(), b, String::from_str(env, "Q1"), String::from_str(env, "b1"), 15, true).unwrap();
+            (a, b)
+        });
+
+        as_core_contract(&env, &contract_id, |env| {
+            let clues_a = Storage::list_clues_for_hunt(env, hunt_a);
+            let clues_b = Storage::list_clues_for_hunt(env, hunt_b);
+            assert_eq!(clues_a.len(), 2, "Hunt A must have exactly 2 clues in its persistent index");
+            assert_eq!(clues_b.len(), 1, "Hunt B must have exactly 1 clue in its persistent index");
+            // Clue counters must be isolated per hunt.
+            assert_eq!(Storage::get_clue_counter(env, hunt_a), 2);
+            assert_eq!(Storage::get_clue_counter(env, hunt_b), 1);
+        });
+    }
+
+    /// Hunt counter lives in persistent storage: creating hunts across multiple
+    /// ledger calls must yield sequentially incrementing IDs.
+    #[test]
+    fn test_hunt_counter_increments_sequentially_in_persistent_storage() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let mut ids = std::vec::Vec::<u64>::new();
+        for _ in 0..5 {
+            let id = as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    String::from_str(env, "Sequential Hunt"),
+                    String::from_str(env, "Counter test"),
+                    None,
+                    None,
+                )
+                .unwrap()
+            });
+            ids.push(id);
+        }
+
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(*id, (i as u64) + 1, "hunt IDs must be sequential starting from 1");
+        }
+
+        as_core_contract(&env, &contract_id, |env| {
+            assert_eq!(Storage::get_hunt_counter(env), 5, "persistent counter must reflect all 5 created hunts");
+        });
+    }
 }
