@@ -251,11 +251,12 @@ pub struct HuntCreatedEvent {
 }
 
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HuntStatusChangedEvent {
     pub hunt_id: u64,
     pub old_status: HuntStatus,
     pub new_status: HuntStatus,
+    pub changed_at: u64,
 }
 
 #[contracttype]

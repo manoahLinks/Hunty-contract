@@ -356,6 +356,16 @@ impl HuntyCore {
 
         env.events()
             .publish((Symbol::new(&env, "HuntActivated"), hunt_id), event);
+
+        // Emit HuntStatusChanged event
+        Self::emit_hunt_status_changed(
+            &env,
+            hunt_id,
+            HuntStatus::Draft,
+            HuntStatus::Active,
+            current_time,
+        );
+
         Ok(())
     }
 
@@ -382,6 +392,14 @@ impl HuntyCore {
         env.events()
             .publish((Symbol::new(&env, "HuntDeactivated"), hunt_id), event);
 
+        Self::emit_hunt_status_changed(
+            &env,
+            hunt_id,
+            HuntStatus::Active,
+            HuntStatus::Paused,
+            env.ledger().timestamp(),
+        );
+
         Ok(())
     }
 
@@ -390,6 +408,7 @@ impl HuntyCore {
 
         // Load hunt
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        let old_status = hunt.status;
 
         // Verify caller is creator
         if caller != hunt.creator {
@@ -445,6 +464,14 @@ impl HuntyCore {
 
         env.events()
             .publish((Symbol::new(&env, "HuntCancelled"), hunt_id), event);
+
+        Self::emit_hunt_status_changed(
+            &env,
+            hunt_id,
+            old_status,
+            HuntStatus::Cancelled,
+            env.ledger().timestamp(),
+        );
 
         Ok(())
     }
