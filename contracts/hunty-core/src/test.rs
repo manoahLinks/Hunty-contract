@@ -2691,6 +2691,208 @@ mod test {
         assert_eq!(board.get(1).unwrap().rank, 2);
     }
 
+    /// Issue #428: players with equal scores are tie-broken by completion time
+    /// (earlier completion ranks higher).
+    #[test]
+    fn test_get_hunt_leaderboard_equal_scores_tiebreak_by_completion_time() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let player_early = Address::generate(&env);
+        let player_late = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        let contract_id = env.register(HuntyCore, ());
+        env.mock_all_auths();
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+                0,
+                None,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 10, true, None)
+                .unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // Both players register at the same timestamp so their start time is identical.
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player_early.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player_late.clone()).unwrap();
+        });
+
+        // Both complete within the same scoring window (< 50s) so scores are equal,
+        // but `player_early` completes one second before `player_late`.
+        env.ledger().set_timestamp(1_700_000_001);
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            submit_answer(env, hunt_id, 1, player_early.clone(), answer.clone(), 1).unwrap();
+        });
+        env.ledger().set_timestamp(1_700_000_002);
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            submit_answer(env, hunt_id, 1, player_late.clone(), answer.clone(), 2).unwrap();
+        });
+
+        let board = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10).unwrap()
+        });
+
+        let first = board.get(0).unwrap();
+        let second = board.get(1).unwrap();
+        assert_eq!(board.len(), 2);
+        assert_eq!(first.score, second.score);
+        assert_eq!(first.player, player_early);
+        assert_eq!(second.player, player_late);
+        assert_eq!(first.rank, 1);
+        assert_eq!(second.rank, 2);
+        assert!(first.completed_at < second.completed_at);
+    }
+
+    /// Issue #428: a leaderboard with a single player returns exactly that player at rank 1.
+    #[test]
+    fn test_get_hunt_leaderboard_single_player() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        let contract_id = env.register(HuntyCore, ());
+        env.mock_all_auths();
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+                0,
+                None,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 10, true, None)
+                .unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+        env.ledger().set_timestamp(1_700_000_001);
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            submit_answer(env, hunt_id, 1, player.clone(), answer.clone(), 1).unwrap();
+        });
+
+        let board = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10).unwrap()
+        });
+
+        assert_eq!(board.len(), 1);
+        let only = board.get(0).unwrap();
+        assert_eq!(only.rank, 1);
+        assert_eq!(only.player, player);
+        assert!(only.is_completed);
+        assert!(only.score > 0);
+    }
+
+    /// Issue #428: players with zero score (registered but no correct answers) appear on
+    /// the leaderboard ranked below players who have scored.
+    #[test]
+    fn test_get_hunt_leaderboard_zero_score_players_ranked_last() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let scorer = Address::generate(&env);
+        let zero_a = Address::generate(&env);
+        let zero_b = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        let contract_id = env.register(HuntyCore, ());
+        env.mock_all_auths();
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+                0,
+                None,
+            )
+            .unwrap()
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 10, true, None)
+                .unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // One player scores; two register but never submit a correct answer (zero score).
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, scorer.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, zero_a.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, zero_b.clone()).unwrap();
+        });
+        env.ledger().set_timestamp(1_700_000_001);
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            submit_answer(env, hunt_id, 1, scorer.clone(), answer.clone(), 1).unwrap();
+        });
+
+        let board = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10).unwrap()
+        });
+
+        assert_eq!(board.len(), 3);
+        let first = board.get(0).unwrap();
+        assert_eq!(first.player, scorer);
+        assert_eq!(first.rank, 1);
+        assert!(first.score > 0);
+        // Remaining entries are the zero-score players, ranked after the scorer.
+        let second = board.get(1).unwrap();
+        let third = board.get(2).unwrap();
+        assert_eq!(second.score, 0);
+        assert_eq!(third.score, 0);
+        assert!(!second.is_completed);
+        assert!(!third.is_completed);
+        assert_eq!(second.rank, 2);
+        assert_eq!(third.rank, 3);
+    }
+
     #[test]
     fn test_get_hunt_statistics_hunt_not_found() {
         let env = Env::default();
